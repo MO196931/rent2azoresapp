@@ -1,0 +1,8 @@
+{
+  "name": "AutoRent AI Agent",
+  "description": "A conversational AI agent for car rental bookings, document collection, vehicle inspection, and digital contracts using Gemini Live API.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
