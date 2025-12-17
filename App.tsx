@@ -191,6 +191,7 @@ export default function App() {
 
   // Active Reservation
   const [activeDocType, setActiveDocType] = useState<string | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false); // New state for loading feedback
   const [reservation, setReservation] = useState<ReservationData>({
     documentsUploaded: false,
     transcript: [],
@@ -471,69 +472,79 @@ export default function App() {
       const matches = dataUrl.match(/^data:(.+);base64,(.+)$/);
       if (!matches) return;
       const base64Data = matches[2];
-      setReservation(prev => ({ ...prev, documentsUploaded: true, uploadedFiles: [...(prev.uploadedFiles || []), { name: fileName, timestamp: Date.now() }] }));
       
-      if (phase === AppPhase.DOCUMENTS) {
-          if (fileName.startsWith('sec_')) {
-              const parts = fileName.split('_');
-              const idx = parseInt(parts[1]);
-              const docType = parts[2]; 
-              const side = parts[3]; 
-              
-              if (reservation.secondaryDrivers?.[idx]) {
-                  triggerNotification('system', `Analisando: 2º Condutor`, 'Extraindo dados...');
+      setIsAnalyzing(true);
+      
+      try {
+          setReservation(prev => ({ ...prev, documentsUploaded: true, uploadedFiles: [...(prev.uploadedFiles || []), { name: fileName, timestamp: Date.now() }] }));
+          
+          if (phase === AppPhase.DOCUMENTS) {
+              if (fileName.startsWith('sec_')) {
+                  const parts = fileName.split('_');
+                  const idx = parseInt(parts[1]);
+                  const docType = parts[2]; 
+                  const side = parts[3]; 
+                  
+                  if (reservation.secondaryDrivers?.[idx]) {
+                      const analysis = await analyzeDocument(base64Data, fileName);
+                      setReservation(prev => {
+                          const newDrivers = [...(prev.secondaryDrivers || [])];
+                          const driver = { ...newDrivers[idx] };
+                          if (docType === 'cc') {
+                              if (side === 'front') driver.ccFrontUploaded = true; else driver.ccBackUploaded = true;
+                              if (analysis.docNumber) driver.ccNumber = analysis.docNumber;
+                          } else {
+                              if (side === 'front') driver.dlFrontUploaded = true; else driver.dlBackUploaded = true;
+                              if (analysis.docNumber) driver.licenseNumber = analysis.docNumber;
+                          }
+                          if (analysis.fullName) driver.name = analysis.fullName;
+                          if (analysis.nif) driver.nif = analysis.nif;
+                          if (analysis.birthDate) driver.birthDate = analysis.birthDate;
+                          newDrivers[idx] = driver;
+                          return { ...prev, secondaryDrivers: newDrivers };
+                      });
+                      triggerNotification('system', 'Sucesso', 'Dados do 2º condutor extraídos.');
+                  }
+              } else {
                   const analysis = await analyzeDocument(base64Data, fileName);
                   setReservation(prev => {
-                      const newDrivers = [...(prev.secondaryDrivers || [])];
-                      const driver = { ...newDrivers[idx] };
-                      if (docType === 'cc') {
-                          if (side === 'front') driver.ccFrontUploaded = true; else driver.ccBackUploaded = true;
-                          if (analysis.docNumber) driver.ccNumber = analysis.docNumber;
-                      } else {
-                          if (side === 'front') driver.dlFrontUploaded = true; else driver.dlBackUploaded = true;
-                          if (analysis.docNumber) driver.licenseNumber = analysis.docNumber;
+                      const updates: Partial<ReservationData> = {};
+                      if (analysis.fullName) updates.driverName = analysis.fullName;
+                      if (analysis.docNumber) {
+                          if (fileName.includes('cc')) updates.ccNumber = analysis.docNumber;
+                          if (fileName.includes('carta')) updates.drivingLicenseNumber = analysis.docNumber;
                       }
-                      if (analysis.fullName) driver.name = analysis.fullName;
-                      if (analysis.nif) driver.nif = analysis.nif;
-                      if (analysis.birthDate) driver.birthDate = analysis.birthDate;
-                      newDrivers[idx] = driver;
-                      return { ...prev, secondaryDrivers: newDrivers };
+                      if (analysis.nif) updates.nif = analysis.nif;
+                      if (analysis.birthDate) {
+                          updates.birthDate = analysis.birthDate;
+                          const today = new Date();
+                          const birth = new Date(analysis.birthDate);
+                          let age = today.getFullYear() - birth.getFullYear();
+                          if (today < new Date(today.getFullYear(), birth.getMonth(), birth.getDate())) age--;
+                          updates.driverAge = age;
+                      }
+                      if (analysis.expiryDate) {
+                          if (fileName.includes('cc')) updates.ccExpiry = analysis.expiryDate; else updates.dlExpiry = analysis.expiryDate;
+                      }
+                      return { ...prev, ...updates };
                   });
+                  triggerNotification('system', 'Sucesso', 'Dados do condutor principal validados.');
               }
-          } else {
-              triggerNotification('system', 'Analisando Principal...', 'Verificando dados.');
-              const analysis = await analyzeDocument(base64Data, fileName);
-              setReservation(prev => {
-                  const updates: Partial<ReservationData> = {};
-                  if (analysis.fullName) updates.driverName = analysis.fullName;
-                  if (analysis.docNumber) {
-                      if (fileName.includes('cc')) updates.ccNumber = analysis.docNumber;
-                      if (fileName.includes('carta')) updates.drivingLicenseNumber = analysis.docNumber;
-                  }
-                  if (analysis.nif) updates.nif = analysis.nif;
-                  if (analysis.birthDate) {
-                      updates.birthDate = analysis.birthDate;
-                      const today = new Date();
-                      const birth = new Date(analysis.birthDate);
-                      let age = today.getFullYear() - birth.getFullYear();
-                      if (today < new Date(today.getFullYear(), birth.getMonth(), birth.getDate())) age--;
-                      updates.driverAge = age;
-                  }
-                  if (analysis.expiryDate) {
-                      if (fileName.includes('cc')) updates.ccExpiry = analysis.expiryDate; else updates.dlExpiry = analysis.expiryDate;
-                  }
-                  return { ...prev, ...updates };
-              });
+          } else if (phase === AppPhase.PICKUP_INSPECTION) {
+              const damages = await analyzeVehicleDamage(base64Data, matches[1]);
+              if (damages.length > 0) {
+                  const formatted = damages.map(d => `[${d.severity}] ${d.part}: ${d.type}`);
+                  setReservation(prev => ({ ...prev, damageReport: [...(prev.damageReport || []), ...formatted] }));
+                  triggerNotification('system', 'Danos Detetados', `${damages.length} registados.`);
+              }
           }
-      } else if (phase === AppPhase.PICKUP_INSPECTION) {
-          const damages = await analyzeVehicleDamage(base64Data, matches[1]);
-          if (damages.length > 0) {
-              const formatted = damages.map(d => `[${d.severity}] ${d.part}: ${d.type}`);
-              setReservation(prev => ({ ...prev, damageReport: [...(prev.damageReport || []), ...formatted] }));
-              triggerNotification('system', 'Danos Detetados', `${damages.length} registados.`);
-          }
+      } catch (e) {
+          console.error(e);
+          triggerNotification('system', 'Erro', 'Falha ao processar a imagem.');
+      } finally {
+          setIsAnalyzing(false);
+          if (activeDocType) setActiveDocType(null);
       }
-      if (activeDocType) setActiveDocType(null);
   };
 
   // ... (Other handlers same as previous: Dashboard, FleetDoc, Signature, Login) ...
@@ -578,6 +589,15 @@ export default function App() {
   const handleAdminLogin = () => { if (db.login(loginPassword)) { setCurrentUser(db.login(loginPassword)); setPhase(AppPhase.ADMIN_DASHBOARD); setLoginPassword(''); } else alert("Credenciais inválidas."); };
   const handleManualHealthCheck = async () => setSystemHealth(await systemMonitor.runDailyHealthCheck());
   
+  const removeSecondaryDriver = (index: number) => {
+    if (!confirm('Tem a certeza que deseja remover este condutor?')) return;
+    setReservation(prev => {
+        const updated = [...(prev.secondaryDrivers || [])];
+        updated.splice(index, 1);
+        return { ...prev, secondaryDrivers: updated };
+    });
+  };
+
   // Google Platform
   const handleGoogleSignIn = async () => {
       if (!googleClientId) return alert("Missing Config");
@@ -978,6 +998,7 @@ export default function App() {
                                  <div key={d.id} className="flex gap-2 mb-2 items-center">
                                      <span className="w-8 h-8 flex items-center justify-center bg-slate-100 dark:bg-slate-900 rounded-full font-bold text-sm">#{i+1}</span>
                                      <input placeholder="Nome 2º Condutor" value={d.name} onChange={e => { const list = [...reservation.secondaryDrivers!]; list[i].name = e.target.value; setReservation(p => ({...p, secondaryDrivers: list}))}} className="flex-1 p-2 border rounded dark:bg-slate-900" />
+                                     <button onClick={() => removeSecondaryDriver(i)} className="text-red-500 hover:text-red-700 p-2" title="Remover">🗑️</button>
                                  </div>
                              ))}
                          </div>
@@ -1150,15 +1171,25 @@ export default function App() {
       {/* Camera Overlay Modal */}
       {activeDocType && (
           <div className="fixed inset-0 bg-black/95 z-[60] p-4 flex flex-col animate-fade-in">
-              <button onClick={() => setActiveDocType(null)} className="text-white mb-6 text-right font-bold text-lg px-4">✕ Fechar</button>
-              <div className="flex-1 flex items-center justify-center">
-                  <div className="w-full max-w-lg bg-slate-900 rounded-2xl p-2 shadow-2xl border border-slate-700">
-                      <CameraCapture 
-                        label={activeDocType.includes('sec') ? "Documento 2º Condutor" : "Documento Principal"} 
-                        onCapture={(d) => handleCapture(d, 'image', activeDocType)} 
-                      />
+              {isAnalyzing ? (
+                  <div className="flex flex-col items-center justify-center h-full text-white animate-pulse">
+                      <div className="w-20 h-20 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-6"></div>
+                      <h3 className="text-2xl font-bold mb-2">A processar documento...</h3>
+                      <p className="text-slate-400">A extrair dados automaticamente via AI</p>
                   </div>
-              </div>
+              ) : (
+                  <>
+                    <button onClick={() => setActiveDocType(null)} className="text-white mb-6 text-right font-bold text-lg px-4 hover:text-slate-300">✕ Fechar</button>
+                    <div className="flex-1 flex items-center justify-center">
+                        <div className="w-full max-w-lg bg-slate-900 rounded-2xl p-2 shadow-2xl border border-slate-700">
+                            <CameraCapture 
+                                label={activeDocType.includes('sec') ? "Documento 2º Condutor" : "Documento Principal"} 
+                                onCapture={(d) => handleCapture(d, 'image', activeDocType)} 
+                            />
+                        </div>
+                    </div>
+                  </>
+              )}
           </div>
       )}
 

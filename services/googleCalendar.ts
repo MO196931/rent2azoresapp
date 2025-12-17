@@ -138,14 +138,23 @@ class GooglePlatformService {
 
   public async createEvent(calendarId: string, eventDetails: { summary: string, description: string, start: string, end: string, email?: string }): Promise<string> {
     if (!this.isAuthenticated) throw new Error("User not signed in");
-    const event = {
+    
+    const resource: any = {
       'summary': eventDetails.summary,
       'description': eventDetails.description,
-      'start': { 'date': eventDetails.start },
-      'end': { 'date': eventDetails.end },
       'attendees': eventDetails.email ? [{'email': eventDetails.email}] : [],
     };
-    const response = await window.gapi.client.calendar.events.insert({ calendarId: calendarId, resource: event });
+
+    // Check if input is a Date string (YYYY-MM-DD) or DateTime string (has 'T')
+    if (eventDetails.start.includes('T')) {
+        resource.start = { 'dateTime': eventDetails.start, 'timeZone': 'Atlantic/Azores' };
+        resource.end = { 'dateTime': eventDetails.end, 'timeZone': 'Atlantic/Azores' };
+    } else {
+        resource.start = { 'date': eventDetails.start };
+        resource.end = { 'date': eventDetails.end };
+    }
+
+    const response = await window.gapi.client.calendar.events.insert({ calendarId: calendarId, resource: resource });
     return response.result.id;
   }
 
@@ -162,7 +171,9 @@ class GooglePlatformService {
           reservation.selectedCar,
           reservation.licensePlate,
           reservation.startDate,
+          reservation.startTime || '10:00', // Added Time
           reservation.endDate,
+          reservation.endTime || '10:00', // Added Time
           reservation.status || 'Confirmed',
           reservation.selectedInsurance,
           (reservation.odometer || 0).toString(),
