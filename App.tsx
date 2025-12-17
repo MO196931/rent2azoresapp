@@ -51,6 +51,7 @@ You must follow this loop. DO NOT move to the next field until the current one i
    - Step B: **MANDATORY CHECK:** You MUST obtain the **PICKUP TIME** and **RETURN TIME**.
      - **Constraint:** If the user provides only dates (e.g., "12 a 15 de Agosto"), you MUST immediately ask: "Certo. E a que horas conta levantar e devolver a viatura? É importante para verificar a disponibilidade."
      - Do NOT check availability until you have Start Date, Start Time, End Date, and End Time.
+     - Times are mandatory for accurate pricing and vehicle handover.
    - Step C: Ask "Prefere levantar no Aeroporto ou noutro local?"
    - Tool Call: \`updateReservationDetails({startDate, startTime, endDate, endTime, pickupLocation})\`
    - Verify: "Confirmo: [Data Início] às [Hora] até [Data Fim] às [Hora]. Correto?"
@@ -206,9 +207,9 @@ export default function App() {
     email: '',
     phone: '',
     startDate: '',
-    startTime: '10:00',
+    startTime: '', // Default empty to force agent/user to provide it
     endDate: '',
-    endTime: '10:00',
+    endTime: '', // Default empty to force agent/user to provide it
     pickupLocation: 'Aeroporto Ponta Delgada',
     returnLocation: 'Aeroporto Ponta Delgada',
     uploadedFiles: [],
@@ -983,7 +984,7 @@ export default function App() {
                                 <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Levantamento</label>
                                 <div className="flex gap-2 mb-2">
                                   <input type="date" value={reservation.startDate || ''} onChange={e => setReservation(p => ({...p, startDate: e.target.value}))} className="flex-[2] p-4 text-lg border rounded dark:bg-slate-900 focus:ring-2 focus:ring-blue-500 outline-none font-medium" />
-                                  <input type="time" value={reservation.startTime || '10:00'} onChange={e => setReservation(p => ({...p, startTime: e.target.value}))} className="flex-[1] p-4 text-lg border rounded dark:bg-slate-900 focus:ring-2 focus:ring-blue-500 outline-none font-medium" />
+                                  <input type="time" value={reservation.startTime || ''} onChange={e => setReservation(p => ({...p, startTime: e.target.value}))} className="flex-[1] p-4 text-lg border rounded dark:bg-slate-900 focus:ring-2 focus:ring-blue-500 outline-none font-medium" />
                                 </div>
                                 <input placeholder="Local (ex: Aeroporto)" value={reservation.pickupLocation || ''} onChange={e => setReservation(p => ({...p, pickupLocation: e.target.value}))} className="w-full p-2 text-sm border rounded dark:bg-slate-900" />
                              </div>
@@ -993,7 +994,7 @@ export default function App() {
                                 <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Devolução</label>
                                 <div className="flex gap-2 mb-2">
                                   <input type="date" value={reservation.endDate || ''} onChange={e => setReservation(p => ({...p, endDate: e.target.value}))} className="flex-[2] p-4 text-lg border rounded dark:bg-slate-900 focus:ring-2 focus:ring-blue-500 outline-none font-medium" />
-                                  <input type="time" value={reservation.endTime || '10:00'} onChange={e => setReservation(p => ({...p, endTime: e.target.value}))} className="flex-[1] p-4 text-lg border rounded dark:bg-slate-900 focus:ring-2 focus:ring-blue-500 outline-none font-medium" />
+                                  <input type="time" value={reservation.endTime || ''} onChange={e => setReservation(p => ({...p, endTime: e.target.value}))} className="flex-[1] p-4 text-lg border rounded dark:bg-slate-900 focus:ring-2 focus:ring-blue-500 outline-none font-medium" />
                                 </div>
                                 <input placeholder="Local (ex: Ponta Delgada)" value={reservation.returnLocation || ''} onChange={e => setReservation(p => ({...p, returnLocation: e.target.value}))} className="w-full p-2 text-sm border rounded dark:bg-slate-900" />
                              </div>
