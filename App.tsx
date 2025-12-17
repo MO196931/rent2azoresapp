@@ -46,11 +46,12 @@ You control the user's screen. Do not just talk about a step; TAKE the user ther
 **STRICT DATA COLLECTION LOOP (MANDATORY):**
 You must follow this loop. DO NOT move to the next field until the current one is confirmed.
 
-1. **DATES & TIMES (CRITICAL):**
-   - Ask: "Para que dias precisa do carro?"
-   - **THEN ASK:** "A que horas conta levantar e devolver a viatura?" (Crucial for blocking the calendar).
-   - Tool Call: \`updateReservationDetails({startDate: '...', startTime: '...', endDate: '...', endTime: '...'})\`
-   - Verify: "Confirmo: Levantamento dia X às Y horas, Devolução dia Z às W horas. Correto?"
+1. **TRIP DETAILS (CRITICAL PRIORITY):**
+   - Step A: Ask "Para que dias precisa do carro?"
+   - Step B: **IMMEDIATELY ASK:** "A que horas conta levantar e devolver?" (Mandatory).
+   - Step C: Ask "Prefere levantar no Aeroporto ou noutro local?"
+   - Tool Call: \`updateReservationDetails({startDate, startTime, endDate, endTime, pickupLocation})\`
+   - Verify: "Confirmo: [Data] às [Hora] no [Local]. Correto?"
 
 2. **NAME:** Ask Full Name -> Tool -> Verify.
 3. **CONTACTS:** Ask Email & Phone -> Tool -> Verify.
@@ -71,12 +72,14 @@ TOOLS:
 // --- Tools Definitions ---
 const checkAvailabilityTool: FunctionDeclaration = {
   name: "checkAvailability",
-  description: "Checks vehicle availability for specific dates.",
+  description: "Checks vehicle availability for specific dates AND times.",
   parameters: {
     type: Type.OBJECT,
     properties: {
       startDate: { type: Type.STRING, description: "YYYY-MM-DD" },
+      startTime: { type: Type.STRING, description: "HH:mm" },
       endDate: { type: Type.STRING, description: "YYYY-MM-DD" },
+      endTime: { type: Type.STRING, description: "HH:mm" },
       category: { type: Type.STRING, description: "Economy, Compact, SUV, etc." }
     },
     required: ["startDate", "endDate"]
@@ -93,6 +96,8 @@ const updateReservationTool: FunctionDeclaration = {
       startTime: { type: Type.STRING, description: "HH:mm (24h format)" },
       endDate: { type: Type.STRING },
       endTime: { type: Type.STRING, description: "HH:mm (24h format)" },
+      pickupLocation: { type: Type.STRING, description: "Location where client wants to pick up the car (e.g. Aeroporto, Ponta Delgada)" },
+      returnLocation: { type: Type.STRING, description: "Location where client wants to return the car" },
       driverName: { type: Type.STRING },
       email: { type: Type.STRING },
       phone: { type: Type.STRING },
@@ -202,6 +207,8 @@ export default function App() {
     startTime: '10:00',
     endDate: '',
     endTime: '10:00',
+    pickupLocation: 'Aeroporto Ponta Delgada',
+    returnLocation: 'Aeroporto Ponta Delgada',
     uploadedFiles: [],
     secondaryDrivers: []
   });
@@ -348,11 +355,15 @@ export default function App() {
 
                     if (fc.name === 'checkAvailability') {
                          const availableCars = [];
+                         // Construct ISO DateTime strings if times are provided, else default to start/end of day
+                         const startIso = args.startTime ? `${args.startDate}T${args.startTime}:00` : args.startDate;
+                         const endIso = args.endTime ? `${args.endDate}T${args.endTime}:00` : args.endDate;
+
                          for (const car of fleet) {
                              let isAvailable = true;
                              if (args.category && !car.category.toLowerCase().includes(args.category.toLowerCase())) continue;
                              if (car.googleCalendarId && googlePlatformService.isAuthenticated) {
-                                 const isFree = await googlePlatformService.isAvailable(car.googleCalendarId, args.startDate, args.endDate);
+                                 const isFree = await googlePlatformService.isAvailable(car.googleCalendarId, startIso, endIso);
                                  if (!isFree) isAvailable = false;
                              }
                              if (isAvailable) availableCars.push(car);
@@ -652,7 +663,7 @@ export default function App() {
           if (final.email) {
               try {
                   const directions = `https://www.google.com/maps/dir/?api=1&destination=Aeroporto+Joao+Paulo+II+Ponta+Delgada`;
-                  const emailBody = `Olá ${final.driverName},\n\nA sua reserva foi confirmada!\n\nVeículo: ${final.selectedCar}\nMatrícula: ${final.licensePlate}\nLevantamento: ${final.startDate} às ${final.startTime}\nDevolução: ${final.endDate} às ${final.endTime}\n\nLocalização: ${directions}\n\nObrigado,\nAutoRent Azores`;
+                  const emailBody = `Olá ${final.driverName},\n\nA sua reserva foi confirmada!\n\nVeículo: ${final.selectedCar}\nMatrícula: ${final.licensePlate}\nLevantamento: ${final.startDate} às ${final.startTime} (${final.pickupLocation})\nDevolução: ${final.endDate} às ${final.endTime} (${final.returnLocation})\n\nLocalização: ${directions}\n\nObrigado,\nAutoRent Azores`;
                   await googlePlatformService.sendEmail(final.email, `Reserva Confirmada: ${final.selectedCar}`, emailBody);
                   triggerNotification('email', 'Email Enviado', `Confirmação enviada para ${final.email}`);
               } catch(e) { console.error("Gmail Error", e); }
@@ -968,19 +979,21 @@ export default function App() {
                          <div className="flex gap-4">
                              <div className="flex-[2]">
                                 <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Levantamento</label>
-                                <div className="flex gap-2">
+                                <div className="flex gap-2 mb-2">
                                   <input type="date" value={reservation.startDate || ''} onChange={e => setReservation(p => ({...p, startDate: e.target.value}))} className="flex-[2] p-4 text-lg border rounded dark:bg-slate-900 focus:ring-2 focus:ring-blue-500 outline-none font-medium" />
                                   <input type="time" value={reservation.startTime || '10:00'} onChange={e => setReservation(p => ({...p, startTime: e.target.value}))} className="flex-[1] p-4 text-lg border rounded dark:bg-slate-900 focus:ring-2 focus:ring-blue-500 outline-none font-medium" />
                                 </div>
+                                <input placeholder="Local (ex: Aeroporto)" value={reservation.pickupLocation || ''} onChange={e => setReservation(p => ({...p, pickupLocation: e.target.value}))} className="w-full p-2 text-sm border rounded dark:bg-slate-900" />
                              </div>
                          </div>
                          <div className="flex gap-4">
                              <div className="flex-[2]">
                                 <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Devolução</label>
-                                <div className="flex gap-2">
+                                <div className="flex gap-2 mb-2">
                                   <input type="date" value={reservation.endDate || ''} onChange={e => setReservation(p => ({...p, endDate: e.target.value}))} className="flex-[2] p-4 text-lg border rounded dark:bg-slate-900 focus:ring-2 focus:ring-blue-500 outline-none font-medium" />
                                   <input type="time" value={reservation.endTime || '10:00'} onChange={e => setReservation(p => ({...p, endTime: e.target.value}))} className="flex-[1] p-4 text-lg border rounded dark:bg-slate-900 focus:ring-2 focus:ring-blue-500 outline-none font-medium" />
                                 </div>
+                                <input placeholder="Local (ex: Ponta Delgada)" value={reservation.returnLocation || ''} onChange={e => setReservation(p => ({...p, returnLocation: e.target.value}))} className="w-full p-2 text-sm border rounded dark:bg-slate-900" />
                              </div>
                          </div>
                          <div>
