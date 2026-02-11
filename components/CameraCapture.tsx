@@ -1,3 +1,4 @@
+
 import React, { useRef, useState, useCallback } from 'react';
 
 interface CameraCaptureProps {
@@ -9,6 +10,7 @@ interface CameraCaptureProps {
 const CameraCapture: React.FC<CameraCaptureProps> = ({ onCapture, label, mode = 'photo' }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   
@@ -58,6 +60,18 @@ const CameraCapture: React.FC<CameraCaptureProps> = ({ onCapture, label, mode = 
     }
   }, [onCapture]);
 
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const dataUrl = event.target?.result as string;
+        onCapture(dataUrl, file.type.startsWith('video') ? 'video' : 'image');
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
   const startRecording = () => {
       if (videoRef.current && videoRef.current.srcObject) {
           const stream = videoRef.current.srcObject as MediaStream;
@@ -74,7 +88,7 @@ const CameraCapture: React.FC<CameraCaptureProps> = ({ onCapture, label, mode = 
               const reader = new FileReader();
               reader.readAsDataURL(blob);
               reader.onloadend = () => {
-                  const base64 = (reader.result as string); // Includes data:video/webm;base64,...
+                  const base64 = (reader.result as string);
                   onCapture(base64, 'video');
                   stopCamera();
               };
@@ -83,7 +97,6 @@ const CameraCapture: React.FC<CameraCaptureProps> = ({ onCapture, label, mode = 
           recorder.start();
           setIsRecording(true);
           
-          // Auto-stop after 15 seconds to prevent huge files in browser memory
           let timeLeft = 15;
           setCountdown(timeLeft);
           const timer = setInterval(() => {
@@ -106,22 +119,38 @@ const CameraCapture: React.FC<CameraCaptureProps> = ({ onCapture, label, mode = 
 
   return (
     <div className="mb-6">
-      <p className="font-bold text-slate-700 dark:text-slate-300 mb-3 text-sm uppercase tracking-wide">{label}</p>
-      <div className="relative bg-black rounded-2xl overflow-hidden aspect-video flex items-center justify-center shadow-lg border-2 border-slate-800">
+      <p className="font-bold text-slate-700 dark:text-slate-300 mb-3 text-xs uppercase tracking-wide">{label}</p>
+      <div className="relative bg-slate-100 dark:bg-black rounded-2xl overflow-hidden aspect-video flex flex-col items-center justify-center shadow-inner border-2 border-slate-200 dark:border-slate-800">
         {!isStreaming && (
-           <button 
-             onClick={startCamera} 
-             className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-4 rounded-full flex items-center gap-3 font-bold transition-all shadow-xl hover:scale-105"
-           >
-             <span className="text-2xl">{mode === 'photo' ? '📷' : '📹'}</span>
-             <span>{mode === 'photo' ? 'Abrir Câmara' : 'Gravar Vídeo'}</span>
-           </button>
+           <div className="flex flex-col gap-3 items-center">
+             <button 
+               onClick={startCamera} 
+               className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl flex items-center gap-3 font-bold transition-all shadow-lg active:scale-95"
+             >
+               <span className="text-xl">{mode === 'photo' ? '📷' : '📹'}</span>
+               <span className="text-sm">Usar Câmara</span>
+             </button>
+             <button 
+               onClick={() => fileInputRef.current?.click()}
+               className="bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 px-6 py-3 rounded-xl flex items-center gap-3 font-bold transition-all border dark:border-slate-700 text-sm shadow-sm active:scale-95"
+             >
+               <span>📁</span>
+               <span>Upload Ficheiro</span>
+             </button>
+             <input 
+                type="file" 
+                ref={fileInputRef} 
+                onChange={handleFileUpload} 
+                className="hidden" 
+                accept={mode === 'photo' ? 'image/*' : 'video/*,image/*'}
+             />
+           </div>
         )}
         <video 
             ref={videoRef} 
             autoPlay 
             playsInline 
-            muted={mode === 'photo'} // Mute preview if photo to avoid feedback, unmute for video if needed (usually better muted locally)
+            muted={mode === 'photo'}
             className={`w-full h-full object-cover ${!isStreaming ? 'hidden' : ''}`} 
         />
         <canvas ref={canvasRef} className="hidden" />
@@ -131,23 +160,23 @@ const CameraCapture: React.FC<CameraCaptureProps> = ({ onCapture, label, mode = 
                  {mode === 'photo' ? (
                      <button 
                         onClick={takePhoto} 
-                        className="w-20 h-20 bg-white rounded-full border-4 border-slate-200 shadow-2xl hover:scale-110 active:scale-95 transition-transform"
+                        className="w-16 h-16 bg-white rounded-full border-4 border-slate-200 shadow-2xl hover:scale-110 active:scale-95 transition-transform"
                      ></button>
                  ) : (
                      <button 
                         onClick={isRecording ? stopRecording : startRecording}
-                        className={`w-20 h-20 rounded-full border-4 border-white shadow-2xl flex items-center justify-center transition-all ${isRecording ? 'bg-red-600 scale-110 animate-pulse' : 'bg-red-500 hover:scale-105'}`}
+                        className={`w-16 h-16 rounded-full border-4 border-white shadow-2xl flex items-center justify-center transition-all ${isRecording ? 'bg-red-600 scale-110 animate-pulse' : 'bg-red-500 hover:scale-105'}`}
                      >
-                         {isRecording && <div className="w-8 h-8 bg-white rounded-sm"></div>}
+                         {isRecording && <div className="w-6 h-6 bg-white rounded-sm"></div>}
                      </button>
                  )}
-                 {isRecording && <span className="text-white font-mono font-bold bg-red-600 px-3 py-1 rounded-full text-sm shadow-md">{countdown}s</span>}
+                 {isRecording && <span className="text-white font-mono font-bold bg-red-600 px-3 py-1 rounded-full text-xs shadow-md">{countdown}s</span>}
             </div>
         )}
         
         {isStreaming && (
-            <button onClick={stopCamera} className="absolute top-4 right-4 bg-black/60 text-white p-3 rounded-full hover:bg-black/80 transition-colors">
-                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            <button onClick={stopCamera} className="absolute top-4 right-4 bg-black/60 text-white p-2 rounded-full hover:bg-black/80 transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
             </button>
         )}
       </div>
