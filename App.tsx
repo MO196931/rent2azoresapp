@@ -1,274 +1,310 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { AppPhase, ReservationData, CarDetails, ServiceItem, CompanySettings, MaintenanceRecord } from './types';
+import { AppPhase, ReservationData, CarDetails } from './types';
+import { SupportedLang } from './translations';
 import { decode, decodeAudioData, createPcmBlob } from './services/audioUtils';
-import { analyzeRegistrationCertificate, askAdminAssistant } from './services/geminiService';
 import { db } from './services/mockDatabase'; 
+import { systemMonitor } from './services/systemMonitor';
+import { generateRentalContract } from './services/pdfService';
 import CameraCapture from './components/CameraCapture';
+import { DiagnosticDashboard } from './components/DiagnosticDashboard';
+import { CloudHub } from './components/CloudHub';
+import SignaturePad from './components/SignaturePad';
 import { GoogleGenAI, LiveServerMessage, Modality, Type } from '@google/genai';
 
 export default function App() {
   const [phase, setPhase] = useState<AppPhase>(AppPhase.WELCOME);
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  const [lang, setLang] = useState<SupportedLang>('pt');
   const [fleet, setFleet] = useState<CarDetails[]>([]);
-  const [adminTab, setAdminTab] = useState<'reservas' | 'frota' | 'ia' | 'config'>('reservas');
-  const [selectedCarForMaint, setSelectedCarForMaint] = useState<CarDetails | null>(null);
-  const [loginPassword, setLoginPassword] = useState('');
-  const [isAiLoading, setIsAiLoading] = useState(false);
-  const [groundingLinks, setGroundingLinks] = useState<{title: string, uri: string}[]>([]);
-
+  
   const [reservation, setReservation] = useState<ReservationData>(() => ({
     status: 'draft', additionalDrivers: [], selectedExtras: [], selectedInsurance: 's1',
     documentsUploaded: false, transcript: [], driverName: '',
-    startDate: new Date().toISOString().split('T')[0], startTime: '10:00',
-    endDate: new Date(Date.now() + 86400000).toISOString().split('T')[0], endTime: '10:00',
-    contextInsights: ''
+    startDate: '', startTime: '', endDate: '', endTime: ''
   }));
 
+  // Refs para controlo de animação de campos preenchidos por IA
+  const [aiUpdatedFields, setAiUpdatedFields] = useState<Set<string>>(new Set());
+
+  // Audio & AI Refs
   const [connected, setConnected] = useState(false);
   const [audioVolume, setAudioVolume] = useState(0);
+  const [isAiThinking, setIsAiThinking] = useState(false);
+  
   const sessionPromiseRef = useRef<Promise<any> | null>(null);
+  const nextStartTimeRef = useRef<number>(0);
+  const outputAudioContextRef = useRef<AudioContext | null>(null);
+  const activeSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
+
+  const t = (key: any) => systemMonitor.getTranslation(lang, key);
 
   useEffect(() => {
     setFleet(db.getFleet());
-  }, []);
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+  }, [theme]);
 
-  const getSystemInstruction = () => {
-    const isConfirmed = reservation.status === 'confirmed';
-    return `
-      Você é o "Concierge AutoRent Azores".
-      
-      MODO ATUAL: ${isConfirmed ? 'EXPERT PROATIVO (Dicas de Viagem)' : 'ASSISTENTE DE RESERVA (Recolha de Dados)'}
-      
-      REGRAS:
-      1. Se status for 'confirmed': Use a função 'procurar_dicas_azores' para dar roteiros personalizados baseados nos interesses do cliente (${reservation.contextInsights}).
-      2. Se status for 'draft': Foque em fechar a reserva (datas, horas, condutor).
-      
-      DADOS: Cliente ${reservation.driverName || 'Novo'}. Carro: ${reservation.selectedCar || 'Nenhum'}.
-    `;
-  };
-
-  const fetchLiveAzoresTips = async (query: string) => {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: `Dê uma dica fascinante sobre os Açores: ${query}`,
-      config: { tools: [{ googleSearch: {} }] },
-    });
-    const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
-    if (chunks) setGroundingLinks(chunks.filter(c => c.web).map(c => ({ title: c.web.title, uri: c.web.uri })));
-    return response.text;
+  // Ferramenta ultra-precisa para preenchimento de dados
+  const updateReservationTool = {
+    name: 'update_reservation_data',
+    parameters: {
+      type: Type.OBJECT,
+      description: 'Atualiza os dados da reserva no formulário. Use sempre que o utilizador mencionar datas, horas ou nomes.',
+      properties: {
+        driverName: { type: Type.STRING },
+        startDate: { type: Type.STRING, description: 'Formato YYYY-MM-DD' },
+        endDate: { type: Type.STRING, description: 'Formato YYYY-MM-DD' },
+        startTime: { type: Type.STRING, description: 'Formato HH:mm' },
+        endTime: { type: Type.STRING, description: 'Formato HH:mm' },
+        selectedCar: { type: Type.STRING, description: 'ID da viatura (c1 para Panda, c2 para Jeep)' }
+      }
+    }
   };
 
   const connectToGemini = async () => {
-    setGroundingLinks([]);
+    if (connected) return;
     try {
+      if (!outputAudioContextRef.current) {
+        outputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+      }
+      const outCtx = outputAudioContextRef.current;
+      if (outCtx.state === 'suspended') await outCtx.resume();
+
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      const audioContext = new AudioContext({ sampleRate: 24000 });
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const inputContext = new AudioContext({ sampleRate: 16000 });
-      const source = inputContext.createMediaStreamSource(stream);
-      const processor = inputContext.createScriptProcessor(4096, 1, 1);
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } 
+      });
+
+      const inputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+      const source = inputCtx.createMediaStreamSource(stream);
+      const processor = inputCtx.createScriptProcessor(1024, 1, 1); // Latência mínima
+
+      const systemInstruction = `
+        Você é o Concierge da AutoRent Azores. Sua missão é guiar o utilizador numa sequência lógica:
+        
+        SEQUÊNCIA DE CONVERSA:
+        1. Perguntar o NOME e as DATAS de aluguer.
+        2. Assim que tiver as datas, perguntar as HORAS de levantamento e devolução.
+        3. Com datas e horas fechadas, sugira um CARRO (Panda para economia, Jeep para trilhos).
+        
+        REGRAS DE COMPORTAMENTO:
+        - Se o utilizador fornecer dados, use 'update_reservation_data' imediatamente.
+        - Não espere que o utilizador preencha tudo. Vá confirmando: "Registado, vou colocar o Jeep para o dia 10".
+        - Se o formulário estiver quase completo, diga: "Vou passar agora para a fase de seleção para confirmarmos o veículo".
+        - Respostas curtas, alegres e profissionais.
+        - Idioma: ${lang.toUpperCase()}.
+      `;
 
       const sessionPromise = ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
         config: {
           responseModalities: [Modality.AUDIO],
-          systemInstruction: getSystemInstruction(),
-          tools: [{
-            functionDeclarations: [{
-              name: 'procurar_dicas_azores',
-              parameters: { type: Type.OBJECT, properties: { query: { type: Type.STRING } }, required: ['query'] }
-            }]
-          }]
+          systemInstruction,
+          tools: [{ functionDeclarations: [updateReservationTool] }],
+          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } }
         },
         callbacks: {
-          onopen: () => setConnected(true),
+          onopen: () => { 
+            setConnected(true); 
+            nextStartTimeRef.current = outCtx.currentTime + 0.1;
+          },
           onmessage: async (msg: LiveServerMessage) => {
             if (msg.toolCall) {
               for (const fc of msg.toolCall.functionCalls) {
-                const result = await fetchLiveAzoresTips(fc.args.query);
-                sessionPromiseRef.current?.then(s => s.sendToolResponse({ functionResponses: { id: fc.id, name: fc.name, response: { result } } }));
+                if (fc.name === 'update_reservation_data') {
+                  const updatedKeys = Object.keys(fc.args);
+                  setAiUpdatedFields(new Set(updatedKeys));
+                  setReservation(prev => ({ ...prev, ...fc.args }));
+                  
+                  // Limpar animação de brilho após 2 segundos
+                  setTimeout(() => setAiUpdatedFields(new Set()), 2000);
+
+                  sessionPromise.then(s => s.sendToolResponse({
+                    functionResponses: { id: fc.id, name: fc.name, response: { result: "OK" } }
+                  }));
+
+                  // Lógica de transição automática de página
+                  if (fc.args.startDate && fc.args.endDate && phase === AppPhase.DETAILS) {
+                    // Se já temos as datas, podemos sugerir avançar
+                  }
+                }
               }
             }
-            const data = msg.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
-            if (data) {
-              const buffer = await decodeAudioData(decode(data), audioContext);
-              const src = audioContext.createBufferSource();
-              src.buffer = buffer; src.connect(audioContext.destination); src.start();
+
+            const audioData = msg.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
+            if (audioData) {
+              setIsAiThinking(false);
+              const audioBuffer = await decodeAudioData(decode(audioData), outCtx, 24000, 1);
+              const currentTime = outCtx.currentTime;
+              if (nextStartTimeRef.current < currentTime) nextStartTimeRef.current = currentTime + 0.05;
+
+              const src = outCtx.createBufferSource();
+              src.buffer = audioBuffer;
+              src.connect(outCtx.destination);
+              src.start(nextStartTimeRef.current);
+              nextStartTimeRef.current += audioBuffer.duration;
+              activeSourcesRef.current.add(src);
+              src.onended = () => activeSourcesRef.current.delete(src);
             }
-          }
+
+            if (msg.serverContent?.interrupted) {
+              activeSourcesRef.current.forEach(s => { try { s.stop(); } catch(e){} });
+              activeSourcesRef.current.clear();
+              nextStartTimeRef.current = outCtx.currentTime;
+            }
+          },
+          onclose: () => setConnected(false),
+          onerror: () => setConnected(false)
         }
       });
+
       sessionPromiseRef.current = sessionPromise;
       processor.onaudioprocess = (e) => {
         const inputData = e.inputBuffer.getChannelData(0);
         let sum = 0; for(let i=0; i<inputData.length; i++) sum += inputData[i]*inputData[i];
-        setAudioVolume(Math.sqrt(sum/inputData.length)*100);
-        sessionPromiseRef.current?.then(s => s.sendRealtimeInput({ media: createPcmBlob(inputData) }));
+        const vol = Math.sqrt(sum/inputData.length)*100;
+        setAudioVolume(vol);
+        
+        // Interrupt AI if user starts speaking loudly
+        if (vol > 15 && activeSourcesRef.current.size > 0) {
+           activeSourcesRef.current.forEach(s => { try { s.stop(); } catch(e){} });
+           activeSourcesRef.current.clear();
+        }
+
+        if (vol > 5) setIsAiThinking(true);
+        sessionPromiseRef.current?.then(s => s.sendRealtimeInput({ media: createPcmBlob(inputData, 16000) }));
       };
-      source.connect(processor); processor.connect(inputContext.destination);
-    } catch (e) { console.error(e); }
+      source.connect(processor); processor.connect(inputCtx.destination);
+    } catch (e) {
+      alert("Erro ao aceder ao microfone.");
+    }
   };
 
-  const handleRegDocCapture = async (carId: string, base64: string) => {
-    setIsAiLoading(true);
-    const data = await analyzeRegistrationCertificate(base64);
-    setFleet(prev => prev.map(c => c.id === carId ? { ...c, ...data, regDocFront: base64 } : c));
-    setIsAiLoading(false);
-  };
+  const InputField = ({ label, value, onChange, placeholder, type = "text", fieldId }: any) => (
+    <div className={`space-y-1 transition-all duration-500 ${aiUpdatedFields.has(fieldId) ? 'scale-[1.02]' : ''}`}>
+      <label className="text-[10px] font-black uppercase text-slate-400 ml-6 tracking-widest">{label}</label>
+      <div className="relative">
+        <input 
+          type={type} 
+          placeholder={placeholder} 
+          className={`w-full p-6 rounded-[2rem] bg-white dark:bg-slate-900 border-2 transition-all font-bold text-lg outline-none ${aiUpdatedFields.has(fieldId) ? 'border-blue-500 shadow-[0_0_20px_rgba(37,99,235,0.2)]' : 'border-transparent focus:border-blue-600'}`} 
+          value={value} 
+          onChange={onChange} 
+        />
+        {aiUpdatedFields.has(fieldId) && <div className="absolute right-6 top-1/2 -translate-y-1/2 text-blue-500 animate-bounce">✨</div>}
+      </div>
+    </div>
+  );
 
-  const addMaintenance = (carId: string) => {
-    const newMaint: MaintenanceRecord = {
-      id: Date.now().toString(),
-      date: new Date().toISOString().split('T')[0],
-      type: 'Preventiva',
-      description: 'Mudança de óleo e filtros',
-      odometer: 0,
-      cost: 150
-    };
-    setFleet(prev => prev.map(c => c.id === carId ? { ...c, maintenanceHistory: [...c.maintenanceHistory, newMaint] } : c));
+  const renderPhase = () => {
+    switch (phase) {
+      case AppPhase.WELCOME:
+        return (
+          <div className="flex flex-col items-center justify-center min-h-[70vh] space-y-12 animate-in fade-in zoom-in duration-700">
+             <div className="w-32 h-32 bg-blue-600 rounded-[3rem] flex items-center justify-center shadow-2xl animate-bounce-slow text-5xl">🐬</div>
+             <div className="text-center space-y-4">
+               <h2 className="text-6xl font-black tracking-tighter leading-tight">Olá! Vamos viajar?</h2>
+               <p className="text-slate-400 font-medium px-4 text-lg">Diga-me o seu nome e as datas para começarmos.</p>
+             </div>
+             <div className="flex flex-col gap-4 w-full max-w-xs">
+               <button onClick={connectToGemini} className="bg-blue-600 text-white py-7 rounded-[2.5rem] text-xl font-black shadow-2xl shadow-blue-500/20 active:scale-95 transition-all flex items-center justify-center gap-4 group">
+                  <span className="text-2xl group-hover:animate-pulse">🎙️</span> Falar com Concierge
+               </button>
+               <button onClick={() => setPhase(AppPhase.DETAILS)} className="text-slate-400 font-black text-[11px] uppercase tracking-widest py-4">Ou preencher manualmente</button>
+             </div>
+          </div>
+        );
+
+      case AppPhase.DETAILS:
+        return (
+          <div className="w-full max-w-md mx-auto space-y-8 animate-in slide-in-from-right duration-500 pb-20">
+            <h3 className="text-4xl font-black tracking-tighter mb-10">Dados do Aluguer</h3>
+            <InputField label="Nome do Condutor" fieldId="driverName" value={reservation.driverName} onChange={(e:any) => setReservation({...reservation, driverName: e.target.value})} placeholder="Ex: João Silva" />
+            
+            <div className="grid grid-cols-2 gap-4">
+              <InputField label="Início" fieldId="startDate" type="date" value={reservation.startDate} onChange={(e:any) => setReservation({...reservation, startDate: e.target.value})} />
+              <InputField label="Levantamento" fieldId="startTime" type="time" value={reservation.startTime} onChange={(e:any) => setReservation({...reservation, startTime: e.target.value})} />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <InputField label="Fim" fieldId="endDate" type="date" value={reservation.endDate} onChange={(e:any) => setReservation({...reservation, endDate: e.target.value})} />
+              <InputField label="Devolução" fieldId="endTime" type="time" value={reservation.endTime} onChange={(e:any) => setReservation({...reservation, endTime: e.target.value})} />
+            </div>
+
+            <button onClick={() => setPhase(AppPhase.VEHICLE_SELECTION)} className="w-full bg-slate-900 text-white py-6 rounded-[2.5rem] text-xl font-black shadow-xl active:scale-95 transition-transform mt-8">Ver Veículos Disponíveis →</button>
+          </div>
+        );
+
+      case AppPhase.VEHICLE_SELECTION:
+        return (
+          <div className="space-y-8 animate-in slide-in-from-right duration-500 pb-20">
+            <h3 className="text-4xl font-black tracking-tighter">Escolha a sua Máquina</h3>
+            <div className="grid grid-cols-1 gap-6">
+              {fleet.map(car => (
+                <div key={car.id} onClick={() => { setReservation({...reservation, selectedCar: car.id}); setPhase(AppPhase.INSURANCE_AND_EXTRAS); }} className={`group relative p-4 rounded-[3rem] bg-white dark:bg-slate-900 border-4 transition-all active:scale-95 ${reservation.selectedCar === car.id ? 'border-blue-600' : 'border-transparent shadow-sm hover:shadow-xl'}`}>
+                  <img src={car.image} className="w-full h-48 object-cover rounded-[2.5rem] mb-4 group-hover:scale-[1.02] transition-transform" />
+                  <div className="flex justify-between items-center px-6 pb-2">
+                    <div>
+                      <h4 className="font-black text-2xl">{car.brand} {car.model}</h4>
+                      <p className="text-slate-400 text-xs font-bold">{car.specs}</p>
+                    </div>
+                    <div className="text-right">
+                      <span className="font-black text-blue-600 text-2xl">{car.price}</span>
+                      <p className="text-[9px] font-black uppercase tracking-tighter opacity-40">IVA Incluído</p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <button onClick={() => setPhase(AppPhase.DETAILS)} className="w-full py-4 text-slate-400 font-black uppercase text-[10px] tracking-widest">← Alterar Datas</button>
+          </div>
+        );
+
+      default:
+        return <div className="p-20 text-center font-black">A carregar interface...</div>;
+    }
   };
 
   return (
-    <div className={`min-h-screen ${theme === 'dark' ? 'dark bg-slate-950 text-white' : 'bg-slate-50 text-slate-900'} transition-colors`}>
-      {phase === AppPhase.ADMIN_DASHBOARD ? (
-        <div className="flex h-screen overflow-hidden">
-          <aside className="w-72 bg-white dark:bg-slate-900 border-r dark:border-slate-800 p-8 flex flex-col">
-            <h1 className="text-2xl font-black text-blue-600 mb-10 tracking-tighter">AutoRent Backoffice</h1>
-            <nav className="space-y-2 flex-1">
-              {['reservas', 'frota', 'ia', 'config'].map((t) => (
-                <button key={t} onClick={() => setAdminTab(t as any)} className={`w-full text-left p-4 rounded-xl font-bold capitalize transition-all ${adminTab === t ? 'bg-blue-600 text-white' : 'hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
-                  {t === 'reservas' ? '📅 Reservas' : t === 'frota' ? '🚗 Gestão de Frota' : t === 'ia' ? '🤖 Admin AI' : '⚙️ Config'}
-                </button>
-              ))}
-            </nav>
-            <button onClick={() => setPhase(AppPhase.WELCOME)} className="p-4 text-red-500 font-bold uppercase text-xs">Sair</button>
-          </aside>
+    <div className={`min-h-screen flex flex-col transition-all duration-700 ${theme === 'dark' ? 'dark bg-slate-950 text-white' : 'bg-slate-50 text-slate-900'}`}>
+      <main className="flex-1 overflow-y-auto px-6 py-10 relative">
+        {renderPhase()}
+      </main>
 
-          <main className="flex-1 p-10 overflow-y-auto">
-            {adminTab === 'reservas' && (
-              <div className="space-y-6">
-                <h2 className="text-4xl font-black">Reservas Ativas</h2>
-                <div className="grid grid-cols-1 gap-4">
-                  {db.getReservations().map(res => (
-                    <div key={res.id} className="bg-white dark:bg-slate-900 p-6 rounded-3xl border dark:border-slate-800 flex justify-between items-center shadow-sm">
-                      <div>
-                        <div className="font-black text-lg">{res.driverName || 'Pendente'}</div>
-                        <div className="text-xs text-slate-400 font-bold">{res.selectedCar} • {res.startDate} a {res.endDate}</div>
-                      </div>
-                      <div className="flex gap-2">
-                        <button 
-                          onClick={() => {
-                            const updated = { ...res, status: 'confirmed' as const };
-                            db.saveReservation(updated);
-                            setReservation(updated);
-                          }}
-                          className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${res.status === 'confirmed' ? 'bg-green-100 text-green-600' : 'bg-blue-600 text-white'}`}
-                        >
-                          {res.status === 'confirmed' ? 'Confirmada' : 'Confirmar Reserva'}
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+      {/* Botão de Voz Flutuante (Minimalista) */}
+      {!connected && phase !== AppPhase.WELCOME && (
+        <button onClick={connectToGemini} className="fixed bottom-10 right-10 w-20 h-20 bg-blue-600 text-white rounded-full shadow-[0_20px_50px_rgba(37,99,235,0.4)] flex items-center justify-center text-4xl z-50 animate-pulse-blue active:scale-90 transition-all hover:scale-110">
+          🎙️
+        </button>
+      )}
 
-            {adminTab === 'frota' && (
-              <div className="space-y-8">
-                <h2 className="text-4xl font-black">Frota & Manutenção</h2>
-                <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
-                  {fleet.map(car => (
-                    <div key={car.id} className="bg-white dark:bg-slate-900 rounded-[2.5rem] border dark:border-slate-800 shadow-xl overflow-hidden">
-                      <div className="p-8 border-b dark:border-slate-800 flex gap-6 items-center">
-                        <img src={car.image} className="w-24 h-24 object-cover rounded-2xl" />
-                        <div className="flex-1">
-                          <h3 className="text-xl font-black">{car.brand} {car.model}</h3>
-                          <p className="text-xs font-mono text-blue-600 font-bold uppercase">{car.licensePlate} • VIN: {car.vin || 'Não registado'}</p>
-                        </div>
-                        <button onClick={() => addMaintenance(car.id)} className="bg-slate-100 dark:bg-slate-800 p-3 rounded-xl hover:bg-blue-600 hover:text-white transition-all text-xs font-black">🔧 Nova Maint.</button>
-                      </div>
-                      
-                      <div className="p-8 grid grid-cols-2 gap-6">
-                        <div>
-                          <p className="text-[10px] font-black uppercase text-slate-400 mb-4 tracking-widest">Doc. Matrícula</p>
-                          <CameraCapture label="Scan Certificado Matrícula" onCapture={(base64) => handleRegDocCapture(car.id, base64)} />
-                        </div>
-                        <div>
-                          <p className="text-[10px] font-black uppercase text-slate-400 mb-4 tracking-widest">Histórico de Manutenções</p>
-                          <div className="space-y-2 max-h-48 overflow-y-auto pr-2">
-                            {car.maintenanceHistory?.length > 0 ? car.maintenanceHistory.map(m => (
-                              <div key={m.id} className="text-[10px] p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg flex justify-between">
-                                <span className="font-bold">{m.date} - {m.type}</span>
-                                <span className="font-mono text-blue-600">{m.cost}€</span>
-                              </div>
-                            )) : <p className="text-[10px] italic text-slate-500">Sem registos.</p>}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+      {/* Overlay de Voz Ativo - Focado no Feedback Visual */}
+      {connected && (
+        <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-3xl z-[100] flex flex-col items-center justify-center p-8 animate-in fade-in duration-300">
+          <div className="w-full max-w-sm text-center space-y-10">
+             <div className="relative flex justify-center">
+                <div className={`w-40 h-40 rounded-full border-8 border-blue-500/20 flex items-center justify-center transition-all duration-75 ${audioVolume > 10 ? 'scale-110 border-blue-400/40' : 'scale-100'}`}>
+                  <div className="w-32 h-32 bg-blue-600 rounded-full flex items-center justify-center text-6xl shadow-2xl animate-pulse">🐬</div>
                 </div>
-              </div>
-            )}
-          </main>
+                {isAiThinking && <div className="absolute inset-0 border-4 border-blue-400 rounded-full animate-ping opacity-30"></div>}
+             </div>
+             
+             <div className="space-y-2">
+               <p className="text-blue-400 font-black uppercase text-xs tracking-[0.4em]">{isAiThinking ? 'A processar o que disse...' : 'Estou a ouvir...'}</p>
+               <h4 className="text-2xl font-black text-white italic">"Diga-me, quais as datas?"</h4>
+             </div>
+
+             <div className="flex gap-1.5 justify-center h-12 items-end">
+               {[1,2,3,4,5,6,7,8].map(i => (
+                 <div key={i} className="w-2 bg-blue-500 rounded-full transition-all duration-75" style={{height: `${Math.max(6, audioVolume * (i*0.3))}px`, opacity: 0.1 + (i*0.1)}}></div>
+               ))}
+             </div>
+
+             <div className="pt-10">
+                <button onClick={() => setConnected(false)} className="w-full py-6 bg-white/10 hover:bg-white/20 rounded-[2.5rem] font-black uppercase text-xs tracking-widest text-white transition-all border border-white/10">Concluir Voz e Ver Formulário</button>
+             </div>
+          </div>
         </div>
-      ) : (
-        <main className="container mx-auto px-4 py-12 max-w-xl text-center">
-          <header className="mb-16">
-            <h1 className="text-5xl font-black tracking-tighter text-blue-600">AutoRent Azores</h1>
-          </header>
-
-          {phase === AppPhase.WELCOME && (
-            <div className="space-y-12">
-               <h2 className="text-6xl font-black leading-none">A sua viagem<br/> começa aqui.</h2>
-               <div className="w-full space-y-4">
-                 <button onClick={connectToGemini} className="w-full bg-blue-600 text-white py-8 rounded-[2.5rem] text-xl font-black shadow-2xl hover:scale-[1.02] transition-transform">
-                    {connected ? '🐬 Concierge Ativo' : '🎙️ Falar com Agente AI'}
-                 </button>
-                 {reservation.status === 'confirmed' && (
-                   <div className="bg-green-100 text-green-700 p-6 rounded-3xl border border-green-200 animate-bounce">
-                     ✅ Reserva Confirmada! O seu concierge está pronto para dar dicas.
-                   </div>
-                 )}
-               </div>
-               <button onClick={() => setPhase(AppPhase.ADMIN_LOGIN)} className="text-slate-400 font-black text-xs uppercase tracking-widest">Gestão Staff</button>
-            </div>
-          )}
-
-          {connected && (
-            <div className="fixed bottom-10 left-6 right-6 bg-slate-900 text-white p-8 rounded-[3rem] shadow-2xl border border-white/10">
-               <div className="flex items-center gap-6">
-                 <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center animate-pulse">🐬</div>
-                 <div className="flex-1 text-left">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-blue-400">Status: {reservation.status === 'confirmed' ? 'Expert Local Ativo' : 'Recolha de Dados'}</p>
-                    <div className="h-2 bg-white/10 rounded-full mt-2 overflow-hidden">
-                      <div className="h-full bg-blue-500" style={{width: `${Math.min(100, audioVolume * 5)}%`}}></div>
-                    </div>
-                 </div>
-               </div>
-               {groundingLinks.length > 0 && (
-                 <div className="mt-6 pt-6 border-t border-white/10 flex flex-wrap gap-2">
-                   {groundingLinks.map((l, i) => (
-                     <a key={i} href={l.uri} target="_blank" className="text-[10px] bg-white/5 px-3 py-1 rounded-full hover:bg-white/20">🔗 {l.title}</a>
-                   ))}
-                 </div>
-               )}
-            </div>
-          )}
-
-          {phase === AppPhase.ADMIN_LOGIN && (
-            <div className="fixed inset-0 bg-slate-950/95 flex items-center justify-center p-6 z-[300]">
-              <div className="bg-white p-12 rounded-[3.5rem] w-full max-w-sm text-center">
-                <h2 className="text-3xl font-black mb-8">Admin Access</h2>
-                <input type="password" value={loginPassword} onChange={e => setLoginPassword(e.target.value)} className="w-full p-5 bg-slate-100 rounded-2xl mb-4 text-center text-2xl font-black" placeholder="••••" />
-                <button onClick={() => loginPassword === 'admin' ? setPhase(AppPhase.ADMIN_DASHBOARD) : alert('Erro')} className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black">Login</button>
-                <button onClick={() => setPhase(AppPhase.WELCOME)} className="mt-6 text-slate-400 font-bold">Cancelar</button>
-              </div>
-            </div>
-          )}
-        </main>
       )}
     </div>
   );

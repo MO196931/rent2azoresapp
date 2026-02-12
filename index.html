@@ -1,13 +1,52 @@
+
 <!DOCTYPE html>
-<html lang="pt">
+<html lang="pt" class="h-full">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#2563eb">
+    
+    <!-- Apple Mobile Web App Meta -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <link rel="manifest" href="/manifest.json">
+    <meta name="apple-mobile-web-app-title" content="AutoRent AI">
+    
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/3202/3202926.png">
     <title>AutoRent AI</title>
+    
+    <style>
+      :root {
+        --sat: env(safe-area-inset-top);
+        --sar: env(safe-area-inset-right);
+        --sab: env(safe-area-inset-bottom);
+        --sal: env(safe-area-inset-left);
+      }
+      body {
+        padding-top: var(--sat);
+        padding-bottom: var(--sab);
+        -webkit-tap-highlight-color: transparent;
+        user-select: none;
+        overscroll-behavior-y: contain;
+      }
+      input, textarea {
+        user-select: auto !important;
+      }
+      /* Prevenir scroll elástico indesejado no iOS */
+      .no-scroll {
+        position: fixed;
+        width: 100%;
+      }
+      @keyframes pulse-blue {
+        0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.7); }
+        70% { transform: scale(1.05); box-shadow: 0 0 0 15px rgba(37, 99, 235, 0); }
+        100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(37, 99, 235, 0); }
+      }
+      .animate-pulse-blue {
+        animation: pulse-blue 2s infinite;
+      }
+    </style>
+
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
       tailwind.config = {
@@ -15,21 +54,40 @@
       }
     </script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-  <script type="importmap">
-{
-  "imports": {
-    "react": "https://esm.sh/react@^19.2.3",
-    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
-    "react/": "https://esm.sh/react@^19.2.3/",
-    "@google/genai": "https://esm.sh/@google/genai@^1.33.0",
-    "vite": "https://esm.sh/vite@^7.3.0",
-    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2"
-  }
-}
-</script>
+    <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@^19.2.3",
+        "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+        "react/": "https://esm.sh/react@^19.2.3/",
+        "@google/genai": "https://esm.sh/@google/genai@^1.33.0",
+        "vite": "https://esm.sh/vite@^7.3.0",
+        "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2",
+        "@capacitor/cli": "https://esm.sh/@capacitor/cli@^8.0.2"
+      }
+    }
+    </script>
 </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/index.tsx"></script>
+  <body class="h-full overflow-hidden bg-slate-50 dark:bg-slate-950">
+    <div id="root" class="h-full overflow-y-auto"></div>
+    <script type="module" src="index.tsx"></script>
+    <script>
+      // Registo de Service Worker com tratamento de erros de Cross-Origin
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          const swPath = './sw.js';
+          navigator.serviceWorker.register(swPath)
+            .then(reg => console.log('PWA: ServiceWorker ativo.', reg.scope))
+            .catch(err => {
+              // Silencia erros de origem em ambientes de sandbox/preview
+              if (err.name === 'SecurityError' || err.message.includes('origin')) {
+                console.info('PWA: ServiceWorker ignorado por restrições de origem (Preview Mode).');
+              } else {
+                console.warn('PWA: Erro no ServiceWorker:', err);
+              }
+            });
+        });
+      }
+    </script>
   </body>
 </html>

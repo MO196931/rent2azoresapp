@@ -1,8 +1,9 @@
 {
   "name": "AutoRent AI Agent",
-  "description": "A conversational AI agent for car rental bookings, document collection, vehicle inspection, and digital contracts using Gemini Live API.",
+  "description": "Conversational AI for car rental and local concierge in Azores.",
   "requestFramePermissions": [
     "camera",
-    "microphone"
+    "microphone",
+    "geolocation"
   ]
 }

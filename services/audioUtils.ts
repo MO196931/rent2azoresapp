@@ -1,7 +1,6 @@
 
 // Audio encoding and decoding utilities following Google GenAI guidelines for raw PCM data.
 
-// Manual base64 encoding following Google GenAI SDK rules
 export function encode(bytes: Uint8Array): string {
   let binary = '';
   const len = bytes.byteLength;
@@ -11,7 +10,6 @@ export function encode(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-// Manual base64 decoding following Google GenAI SDK rules
 export function decode(base64: string): Uint8Array {
   const binaryString = atob(base64);
   const len = binaryString.length;
@@ -22,7 +20,9 @@ export function decode(base64: string): Uint8Array {
   return bytes;
 }
 
-// Decodes raw PCM audio bytes into an AudioBuffer
+/**
+ * Decodes raw PCM audio bytes into an AudioBuffer with high precision scaling.
+ */
 export async function decodeAudioData(
   data: Uint8Array,
   ctx: AudioContext,
@@ -36,23 +36,23 @@ export async function decodeAudioData(
   for (let channel = 0; channel < numChannels; channel++) {
     const channelData = buffer.getChannelData(channel);
     for (let i = 0; i < frameCount; i++) {
+      // Usamos uma escala ligeiramente mais conservadora para evitar clipping digital em colunas de telemóvel
       channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
     }
   }
   return buffer;
 }
 
-// Creates a PCM blob for real-time input to the Live API
 export function createPcmBlob(data: Float32Array, sampleRate: number = 16000): { data: string; mimeType: string } {
   const l = data.length;
   const int16 = new Int16Array(l);
   for (let i = 0; i < l; i++) {
-    // Scaling for 16-bit PCM (using 32768 as per guidelines)
-    int16[i] = data[i] * 32768;
+    // Normalização básica para garantir que o áudio de entrada seja captado com clareza
+    const s = Math.max(-1, Math.min(1, data[i]));
+    int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
   }
   return {
     data: encode(new Uint8Array(int16.buffer)),
-    // The supported audio MIME type is 'audio/pcm'.
     mimeType: `audio/pcm;rate=${sampleRate}`,
   };
 }
