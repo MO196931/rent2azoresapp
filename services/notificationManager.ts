@@ -1,5 +1,5 @@
 
-export type NotificationType = 'email' | 'push' | 'sms' | 'system';
+export type NotificationType = 'email' | 'push' | 'sms' | 'system' | 'whatsapp';
 
 export interface AppNotification {
   id: string;
@@ -11,57 +11,47 @@ export interface AppNotification {
 
 class NotificationManager {
   private permission: NotificationPermission = 'default';
+  private listeners: ((n: AppNotification) => void)[] = [];
 
   constructor() {
-    if ('Notification' in window) {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
       this.permission = Notification.permission;
     }
   }
 
+  public subscribe(callback: (n: AppNotification) => void) {
+    this.listeners.push(callback);
+    return () => {
+      this.listeners = this.listeners.filter(l => l !== callback);
+    };
+  }
+
   public async requestPermission(): Promise<boolean> {
     if (!('Notification' in window)) return false;
-    
     try {
       const permission = await Notification.requestPermission();
       this.permission = permission;
       return permission === 'granted';
     } catch (e) {
-      console.error("Notification permission error", e);
       return false;
     }
   }
 
-  public sendNativePush(title: string, body: string) {
-    if (this.permission === 'granted') {
-      try {
-        new Notification(title, {
-          body: body,
-          icon: 'https://cdn-icons-png.flaticon.com/512/3202/3202926.png', // Generic car icon
-          silent: false
-        });
-      } catch (e) {
-        console.warn("Push notification failed", e);
-      }
-    }
-  }
-
-  // Simulates sending an email/sms by logging and returning an object for the UI to display
   public createAlert(type: NotificationType, title: string, message: string): AppNotification {
-    // In a real app, this would trigger an API call to SendGrid/Twilio/N8N
-    console.log(`[${type.toUpperCase()}] Sending to ${title}: ${message}`);
-    
-    // If it's a critical update, try to send a native push as well
-    if (type === 'push' || type === 'system') {
-        this.sendNativePush(title, message);
-    }
-
-    return {
-      id: Date.now().toString() + Math.random(),
+    const note: AppNotification = {
+      id: `${Date.now()}-${Math.random()}`,
       type,
       title,
       message,
       timestamp: Date.now()
     };
+
+    if (type === 'whatsapp' || type === 'email') {
+      console.log(`[GATEWAY OUT] ${type.toUpperCase()}: ${message}`);
+    }
+
+    this.listeners.forEach(l => l(note));
+    return note;
   }
 }
 

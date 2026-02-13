@@ -4,40 +4,40 @@ export enum AppPhase {
   DETAILS = 'DETAILS',
   VEHICLE_SELECTION = 'VEHICLE_SELECTION',
   INSURANCE_AND_EXTRAS = 'INSURANCE_AND_EXTRAS',
-  DOCUMENTS = 'DOCUMENTS',
-  PICKUP_INSPECTION = 'PICKUP_INSPECTION',
-  GENERAL_TERMS = 'GENERAL_TERMS',
+  VEHICLE_CHECKIN = 'VEHICLE_CHECKIN',
+  DOCUMENTS_COLLECTION = 'DOCUMENTS_COLLECTION',
   CONTRACT_SIGNATURE = 'CONTRACT_SIGNATURE',
   COMPLETED = 'COMPLETED',
-  ADMIN_LOGIN = 'ADMIN_LOGIN',
   ADMIN_DASHBOARD = 'ADMIN_DASHBOARD'
 }
 
-export interface MaintenanceRecord {
-  id: string;
-  date: string;
-  type: 'Preventiva' | 'Corretiva' | 'IPO' | 'Pneus';
-  description: string;
-  odometer: number;
-  cost: number;
+export interface DriverInfo {
+  name: string;
+  email: string;
+  phone: string;
+  nif?: string;
+  idNumber?: string;
+  licenseNumber?: string;
+  licenseExpiry?: string;
+  docFront?: string;
+  docBack?: string;
+  licenseFront?: string;
+  licenseBack?: string;
 }
 
-export interface CarDetails {
-  id: string;
-  brand?: string;
-  model: string;
-  licensePlate: string;
-  vin?: string;
-  category: string;
-  price: string;
-  image: string;
-  specs: string;
-  // Campos do Certificado de Matrícula
-  regDocFront?: string;
-  regDocBack?: string;
-  lastIpoDate?: string;
-  nextIpoDate?: string;
-  maintenanceHistory: MaintenanceRecord[];
+export interface VehicleCheckinData {
+  odometerPhoto?: string;
+  odometerValue?: number;
+  fuelLevel?: string;
+  interiorFront?: string;
+  interiorBack?: string;
+  exteriorFront?: string;
+  exteriorBack?: string;
+  exteriorLeft?: string;
+  exteriorRight?: string;
+  damagePhotos: string[];
+  observations?: string;
+  isCompleteLater?: boolean;
 }
 
 export interface ReservationData {
@@ -47,20 +47,46 @@ export interface ReservationData {
   startTime?: string;
   endDate?: string;
   endTime?: string;
-  driverName?: string;
-  email?: string;
-  phone?: string;
-  nif?: string;
-  selectedCar?: string;
-  licensePlate?: string;
-  transcript: { role: 'user' | 'model'; text: string }[];
-  contextInsights?: string;
-  additionalDrivers: { name: string; email: string }[];
+  mainDriver: DriverInfo;
+  additionalDrivers: DriverInfo[];
+  selectedCarId?: string;
   selectedExtras: string[];
-  selectedInsurance?: string;
-  documentsUploaded: boolean;
-  odometer?: number;
-  fuelLevel?: string;
+  selectedInsuranceId?: string;
+  checkin?: VehicleCheckinData;
+  signature?: string;
+  createdAt?: string;
+  learningProfile?: {
+    preferredLanguage: string;
+    lastInteractionStep: AppPhase;
+    userCorrections: number;
+  };
+}
+
+export type CarStatus = 'available' | 'rented' | 'maintenance' | 'cleaning';
+
+export interface CarDetails {
+  id: string;
+  brand: string;
+  model: string;
+  licensePlate: string;
+  vin: string;
+  category: string;
+  price: string;
+  image: string;
+  specs: string;
+  status: CarStatus;
+  currentOdometer: number;
+  fuelLevel: string;
+}
+
+export interface ServiceItem {
+  id: string;
+  name: string;
+  price: number;
+  priceModel: 'fixed' | 'daily';
+  type: 'fee' | 'extra' | 'insurance';
+  description: string;
+  coverageDetails?: string;
 }
 
 export interface CompanySettings {
@@ -72,34 +98,32 @@ export interface CompanySettings {
   email: string;
 }
 
-export interface ServiceItem {
+// Added MaintenanceRecord to resolve export errors in mockDatabase and AdminManagement
+export interface MaintenanceRecord {
   id: string;
-  name: string;
-  price: number;
-  priceModel: 'fixed' | 'daily';
-  type: 'fee' | 'extra' | 'insurance';
+  carId: string;
+  date: string;
+  type: 'Preventiva' | 'Corretiva' | 'IPO' | 'Pneus' | 'Limpeza';
+  odometer: number;
+  cost: number;
   description: string;
 }
 
-// System Monitoring Types
 export type ModuleName = 'AI_CORE' | 'AUDIO_SUBSYSTEM' | 'NETWORK' | 'DATABASE' | 'USER_INTERFACE';
 
 export interface ModuleHealth {
   name: ModuleName;
-  status: 'healthy' | 'degraded' | 'critical' | 'healing';
+  status: 'healthy' | 'degraded' | 'healing';
   latency: number;
   errorCount: number;
-  lastError?: string;
-  lastHealTimestamp?: number;
 }
 
 export interface SystemLog {
   id: string;
   timestamp: number;
   level: 'info' | 'warn' | 'error' | 'fatal';
-  component: ModuleName | string;
+  component: string;
   message: string;
-  stack?: string;
   resolved: boolean;
 }
 
@@ -112,23 +136,21 @@ export interface HealingAction {
   resultMessage: string;
 }
 
-export interface LearningMetric {
-  metric: string;
-  value: number;
-  threshold: number;
-  adaptationApplied: string;
-}
-
 export interface HealthReport {
   lastCheck: string;
-  status: 'healthy' | 'degraded' | 'critical';
+  status: 'healthy' | 'degraded';
   issues: string[];
   stabilityScore: number;
   modules: ModuleHealth[];
   recentHeals: HealingAction[];
 }
 
-// Google Calendar Integration Type
+export interface LearningMetric {
+  topic: string;
+  timestamp: number;
+  improvement: number;
+}
+
 export interface GoogleCalendar {
   id: string;
   summary: string;

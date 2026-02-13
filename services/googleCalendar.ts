@@ -1,4 +1,5 @@
 
+
 import { GoogleCalendar, ReservationData } from "../types";
 
 // Types for the Google API Client
@@ -162,22 +163,23 @@ class GooglePlatformService {
 
   // For Reservations (Specific structure)
   public async appendToSheet(spreadsheetId: string, reservation: ReservationData): Promise<void> {
+      // Fix: Update property names to match ReservationData and DriverInfo interface definitions
       const values = [
           reservation.id || Date.now().toString(),
-          new Date().toISOString(), // Created At
-          reservation.driverName,
-          reservation.email,
-          reservation.phone,
-          reservation.selectedCar,
-          reservation.licensePlate,
-          reservation.startDate,
+          reservation.createdAt || new Date().toISOString(), // Created At
+          reservation.mainDriver.name,
+          reservation.mainDriver.email,
+          reservation.mainDriver.phone,
+          reservation.selectedCarId || 'N/A',
+          'N/A', // licensePlate is not stored directly on reservation draft
+          reservation.startDate || '',
           reservation.startTime || '10:00', // Added Time
-          reservation.endDate,
+          reservation.endDate || '',
           reservation.endTime || '10:00', // Added Time
           reservation.status || 'Confirmed',
-          reservation.selectedInsurance,
-          (reservation.odometer || 0).toString(),
-          (reservation.fuelLevel || 'N/A')
+          reservation.selectedInsuranceId || 'N/A',
+          '0', // odometerOut property removed from ReservationData
+          'N/A' // fuelLevelOut property removed from ReservationData
       ];
       await this.appendRow(spreadsheetId, values as string[]);
   }
