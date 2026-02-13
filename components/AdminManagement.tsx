@@ -30,8 +30,8 @@ const StatCard = ({ label, value, icon, color }: { label: string; value: string 
   </div>
 );
 
-const InputField = ({ label, value, onChange, type = 'text', placeholder = '' }: { label: string; value: string; onChange: (v: string) => void; type?: string; placeholder?: string }) => (
-  <div className="space-y-1 w-full">
+const InputField = ({ label, value, onChange, type = 'text', placeholder = '' }: { label: string; value: string | number; onChange: (v: string) => void; type?: string; placeholder?: string }) => (
+  <div className="space-y-1 w-full text-left">
     <label className="text-[10px] font-black uppercase text-slate-400 ml-4 tracking-widest">{label}</label>
     <input
       type={type}
@@ -39,6 +39,19 @@ const InputField = ({ label, value, onChange, type = 'text', placeholder = '' }:
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
       className="w-full p-5 rounded-2xl bg-slate-50 dark:bg-slate-800 border-2 border-transparent focus:border-blue-600 transition-all font-bold outline-none text-slate-900 dark:text-white"
+    />
+  </div>
+);
+
+const TextAreaField = ({ label, value, onChange, placeholder = '' }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string }) => (
+  <div className="space-y-1 w-full text-left">
+    <label className="text-[10px] font-black uppercase text-slate-400 ml-4 tracking-widest">{label}</label>
+    <textarea
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      rows={3}
+      className="w-full p-5 rounded-2xl bg-slate-50 dark:bg-slate-800 border-2 border-transparent focus:border-blue-600 transition-all font-bold outline-none text-slate-900 dark:text-white resize-none"
     />
   </div>
 );
@@ -63,18 +76,13 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({ onBack, lang, 
     setCompany(db.getCompany());
   };
 
-  // Fix: Implemented missing handleOcr function to process car registration docs
   const handleOcr = async (base64: string) => {
     setOcrLoading(true);
     try {
-      // Remove data URL prefix if present before sending to Gemini
       const cleanBase64 = base64.includes(',') ? base64.split(',')[1] : base64;
       const result = await analyzeRegistrationCertificate(cleanBase64);
       if (result) {
-        setEditingCar(prev => ({
-          ...prev,
-          ...result
-        }));
+        setEditingCar(prev => ({ ...prev, ...result }));
       }
     } catch (error) {
       console.error("OCR failed", error);
@@ -136,7 +144,7 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({ onBack, lang, 
       <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-12">
         <div className="flex items-center gap-6">
           {company.logoUrl && <img src={company.logoUrl} className="h-16 w-auto object-contain bg-white p-2 rounded-xl shadow-sm" />}
-          <div>
+          <div className="text-left">
             <h1 className="text-4xl font-black tracking-tighter text-slate-900 dark:text-white">Admin Hub Elite</h1>
             <p className="text-slate-400 font-bold uppercase text-[10px] tracking-[0.3em]">{company.name}</p>
           </div>
@@ -167,7 +175,7 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({ onBack, lang, 
             <StatCard label="Maintenance Needed" value={stats.pendingMaintenance} icon="🔧" color="text-amber-500" />
             
             <div className="lg:col-span-4 grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
-                <div className="bg-white dark:bg-slate-900 p-8 rounded-[3rem] shadow-sm border dark:border-slate-800">
+                <div className="bg-white dark:bg-slate-900 p-8 rounded-[3rem] shadow-sm border dark:border-slate-800 text-left">
                    <h3 className="font-black text-xs uppercase tracking-widest mb-6">Recent Fleet Activity</h3>
                    <div className="space-y-4">
                      {db.getMaintenance().slice(-4).reverse().map(m => (
@@ -189,14 +197,14 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({ onBack, lang, 
 
         {activeTab === 'settings' && (
           <div className="max-w-4xl animate-in slide-in-from-right-4">
-             <div className="mb-10">
+             <div className="mb-10 text-left">
                 <h3 className="text-2xl font-black tracking-tighter">Company Profile</h3>
                 <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest">Business Identity & Branding</p>
              </div>
              
              <div className="grid grid-cols-1 md:grid-cols-3 gap-10">
                 <div className="space-y-6">
-                   <p className="text-[10px] font-black uppercase text-slate-400 ml-4 tracking-widest">Company Logo</p>
+                   <p className="text-[10px] font-black uppercase text-slate-400 ml-4 tracking-widest text-left">Company Logo</p>
                    <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border dark:border-slate-800 aspect-square flex flex-col items-center justify-center gap-4 group relative overflow-hidden">
                       {company.logoUrl ? (
                          <img src={company.logoUrl} className="w-full h-auto object-contain max-h-40" />
@@ -229,7 +237,7 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({ onBack, lang, 
         {activeTab === 'fleet' && (
           <div className="space-y-10 animate-in slide-in-from-right-4 duration-500">
             <div className="flex justify-between items-end">
-               <div>
+               <div className="text-left">
                   <h3 className="text-2xl font-black tracking-tighter">Fleet Inventory</h3>
                   <p className="text-slate-400 text-[10px] font-bold uppercase">Manage vehicles and run OCR diagnostics</p>
                </div>
@@ -244,7 +252,7 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({ onBack, lang, 
                   <div className="relative h-56 overflow-hidden">
                      <img src={car.image || 'https://images.unsplash.com/photo-1549317661-bd32c8ce0db2?auto=format&fit=crop&q=80&w=600'} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-1000" alt={car.model} />
                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent"></div>
-                     <div className="absolute bottom-6 left-6 text-white">
+                     <div className="absolute bottom-6 left-6 text-white text-left">
                         <p className="font-black text-2xl tracking-tighter leading-none">{car.brand} {car.model}</p>
                         <p className="text-[10px] font-black uppercase tracking-[0.2em] opacity-80 mt-1">{car.licensePlate}</p>
                      </div>
@@ -252,7 +260,7 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({ onBack, lang, 
                        {car.status}
                      </div>
                   </div>
-                  <div className="p-8 flex-1 flex flex-col justify-between space-y-6">
+                  <div className="p-8 flex-1 flex flex-col justify-between space-y-6 text-left">
                     <div className="grid grid-cols-2 gap-4 text-[10px] font-black uppercase tracking-widest text-slate-400">
                        <div className="space-y-1">
                            <p>Odometer</p>
@@ -278,11 +286,11 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({ onBack, lang, 
         {activeTab === 'services' && (
           <div className="space-y-12 animate-in slide-in-from-right-4 duration-500">
             <div className="flex justify-between items-end">
-               <div>
+               <div className="text-left">
                   <h3 className="text-2xl font-black tracking-tighter">Services & Insurance</h3>
                   <p className="text-slate-400 text-[10px] font-bold uppercase">Pricing models and product catalog</p>
                </div>
-               <button onClick={() => setEditingService({ type: 'extra', priceModel: 'daily', price: 0 })} className="bg-blue-600 text-white px-8 py-4 rounded-2xl font-black text-xs uppercase tracking-widest active:scale-95 transition-all">
+               <button onClick={() => setEditingService({ type: 'extra', priceModel: 'daily', price: 0, name: '', description: '' })} className="bg-blue-600 text-white px-8 py-4 rounded-2xl font-black text-xs uppercase tracking-widest active:scale-95 transition-all shadow-xl shadow-blue-500/20">
                   + Add New Item
                </button>
             </div>
@@ -299,7 +307,7 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({ onBack, lang, 
                         <th className="px-8 py-4 text-right">Actions</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y dark:divide-slate-800">
+                    <tbody className="divide-y dark:divide-slate-800 text-left">
                       {services.filter(s => s.type === 'insurance').map(srv => (
                         <tr key={srv.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
                           <td className="px-8 py-6">
@@ -333,7 +341,7 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({ onBack, lang, 
                         <th className="px-8 py-4 text-right">Actions</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y dark:divide-slate-800">
+                    <tbody className="divide-y dark:divide-slate-800 text-left">
                       {services.filter(s => s.type !== 'insurance').map(srv => (
                         <tr key={srv.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
                           <td className="px-8 py-6">
@@ -376,7 +384,7 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({ onBack, lang, 
                     <th className="px-8 py-4 text-right">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y dark:divide-slate-800">
+                <tbody className="divide-y dark:divide-slate-800 text-left">
                   {reservations.map(r => (
                     <tr key={r.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
                       <td className="px-8 py-6">
@@ -413,12 +421,82 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({ onBack, lang, 
         {activeTab === 'system' && <DiagnosticDashboard autoStart={initialAutoScan} />}
       </main>
 
-      {/* MODALS */}
+      {/* MODAL - EDIT SERVICE / INSURANCE */}
+      {editingService && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[110] flex items-center justify-center p-4 md:p-6 overflow-y-auto">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-2xl rounded-[3rem] p-8 md:p-12 shadow-2xl animate-in zoom-in duration-300 relative">
+            <button onClick={() => setEditingService(null)} className="absolute top-8 right-8 text-2xl opacity-50 hover:opacity-100 transition-opacity">✕</button>
+            <div className="mb-10 text-left">
+               <h4 className="text-4xl font-black tracking-tighter">Product Catalog</h4>
+               <p className="text-slate-400 font-black uppercase text-[10px] tracking-[0.3em]">Configure Insurance or Extra Service</p>
+            </div>
+            
+            <form onSubmit={handleSaveService} className="space-y-6">
+               <div className="grid grid-cols-2 gap-6">
+                  <div className="space-y-1 text-left">
+                      <label className="text-[10px] font-black uppercase text-slate-400 ml-4 tracking-widest">Type</label>
+                      <select 
+                        className="w-full p-5 rounded-2xl bg-slate-50 dark:bg-slate-800 border-2 border-transparent focus:border-blue-600 transition-all font-bold outline-none appearance-none" 
+                        value={editingService.type} 
+                        onChange={(e) => setEditingService({...editingService, type: e.target.value as any})}
+                      >
+                          <option value="insurance">Insurance Policy</option>
+                          <option value="extra">Extra Equipment / Add-on</option>
+                          <option value="fee">Administrative Fee</option>
+                      </select>
+                  </div>
+                  <InputField label="Price (€)" value={editingService.price || 0} type="number" onChange={(v: string) => setEditingService({...editingService, price: Number(v)})} />
+               </div>
+
+               <InputField label="Item Name" value={editingService.name || ''} placeholder="Ex: Full Insurance, Baby Seat..." onChange={(v: string) => setEditingService({...editingService, name: v})} />
+               
+               <TextAreaField label="Description" value={editingService.description || ''} placeholder="Breve resumo visível para o cliente..." onChange={(v: string) => setEditingService({...editingService, description: v})} />
+
+               <div className="grid grid-cols-2 gap-6">
+                  <div className="space-y-1 text-left">
+                      <label className="text-[10px] font-black uppercase text-slate-400 ml-4 tracking-widest">Price Model</label>
+                      <select 
+                        className="w-full p-5 rounded-2xl bg-slate-50 dark:bg-slate-800 border-2 border-transparent focus:border-blue-600 transition-all font-bold outline-none appearance-none" 
+                        value={editingService.priceModel} 
+                        onChange={(e) => setEditingService({...editingService, priceModel: e.target.value as any})}
+                      >
+                          <option value="daily">Daily Rate (Per day)</option>
+                          <option value="fixed">Fixed Price (One-time)</option>
+                      </select>
+                  </div>
+                  {editingService.type === 'insurance' && (
+                     <InputField label="Deductible / Franquia (€)" value={0} type="number" onChange={() => {}} />
+                  )}
+               </div>
+
+               {editingService.type === 'insurance' && (
+                  <TextAreaField 
+                    label="Coverage Details (Internal)" 
+                    value={editingService.coverageDetails || ''} 
+                    placeholder="Detalhes legais da apólice..." 
+                    onChange={(v: string) => setEditingService({...editingService, coverageDetails: v})} 
+                  />
+               )}
+
+               <div className="flex gap-4 pt-10">
+                  <button type="submit" className="flex-1 bg-blue-600 text-white py-6 rounded-3xl font-black uppercase text-xs tracking-widest shadow-2xl shadow-blue-500/40 hover:bg-blue-700 active:scale-95 transition-all">
+                     Save Product
+                  </button>
+                  <button type="button" onClick={() => setEditingService(null)} className="flex-1 bg-slate-100 dark:bg-slate-800 py-6 rounded-3xl font-black uppercase text-xs tracking-widest hover:bg-slate-200 transition-all">
+                     Cancel
+                  </button>
+               </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL - FLEET (Existing) */}
       {editingCar && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[110] flex items-center justify-center p-4 md:p-6 overflow-y-auto">
           <div className="bg-white dark:bg-slate-900 w-full max-w-5xl rounded-[3rem] p-8 md:p-12 shadow-2xl animate-in zoom-in duration-300 relative">
             <button onClick={() => setEditingCar(null)} className="absolute top-8 right-8 text-2xl opacity-50 hover:opacity-100 transition-opacity">✕</button>
-            <div className="mb-10">
+            <div className="mb-10 text-left">
                <h4 className="text-4xl font-black tracking-tighter">Fleet Asset Manager</h4>
                <p className="text-slate-400 font-black uppercase text-[10px] tracking-[0.3em]">Vehicle Registration & Identity Diagnostic</p>
             </div>
@@ -450,7 +528,7 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({ onBack, lang, 
                      <InputField label="VIN" value={editingCar.vin || ''} onChange={(v: string) => setEditingCar({...editingCar, vin: v})} />
                   </div>
                   <div className="grid grid-cols-2 gap-6 pt-6">
-                      <div className="space-y-1">
+                      <div className="space-y-1 text-left">
                           <label className="text-[10px] font-black uppercase text-slate-400 ml-4">Deployment Status</label>
                           <select className="w-full p-5 rounded-2xl bg-slate-50 dark:bg-slate-800 border-2 border-transparent focus:border-blue-600 transition-all font-bold outline-none appearance-none" value={editingCar.status} onChange={(e) => setEditingCar({...editingCar, status: e.target.value as any})}>
                               <option value="available">Active / Available</option>
