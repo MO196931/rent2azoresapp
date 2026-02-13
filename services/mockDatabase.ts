@@ -6,7 +6,8 @@ const KEYS = {
   RESERVATIONS: 'autorent_db_reservations_v2',
   COMPANY: 'autorent_db_company_v2',
   SERVICES: 'autorent_db_services_v2',
-  MAINTENANCE: 'autorent_db_maintenance_v2'
+  MAINTENANCE: 'autorent_db_maintenance_v2',
+  CLOUD_CONFIG: 'autorent_db_cloud_config_v2'
 };
 
 const INITIAL_FLEET: CarDetails[] = [
@@ -22,12 +23,28 @@ const INITIAL_FLEET: CarDetails[] = [
   }
 ];
 
+const DEFAULT_COMPANY: CompanySettings = {
+  name: 'AutoRent Azores Elite',
+  address: 'Ponta Delgada, Açores',
+  nif: '500123456',
+  email: 'geral@autorentazores.pt',
+  logoUrl: 'https://cdn-icons-png.flaticon.com/512/3202/3202926.png'
+};
+
+export interface CloudConfig {
+  spreadsheetId?: string;
+  calendarId?: string;
+  driveFolderId?: string;
+  clientId?: string;
+}
+
 class MockDatabase {
   constructor() { this.initialize(); }
 
   private initialize() {
     if (!localStorage.getItem(KEYS.FLEET)) localStorage.setItem(KEYS.FLEET, JSON.stringify(INITIAL_FLEET));
     if (!localStorage.getItem(KEYS.RESERVATIONS)) localStorage.setItem(KEYS.RESERVATIONS, JSON.stringify([]));
+    if (!localStorage.getItem(KEYS.COMPANY)) localStorage.setItem(KEYS.COMPANY, JSON.stringify(DEFAULT_COMPANY));
   }
 
   private _get<T>(key: string): T[] {
@@ -48,14 +65,25 @@ class MockDatabase {
     return item;
   }
 
+  getCloudConfig(): CloudConfig {
+    return JSON.parse(localStorage.getItem(KEYS.CLOUD_CONFIG) || '{}');
+  }
+
+  saveCloudConfig(config: CloudConfig) {
+    const current = this.getCloudConfig();
+    localStorage.setItem(KEYS.CLOUD_CONFIG, JSON.stringify({ ...current, ...config }));
+  }
+
   getFleet(): CarDetails[] { return this._get(KEYS.FLEET); }
   getReservations(): ReservationData[] { return this._get(KEYS.RESERVATIONS); }
   saveReservation(reservation: ReservationData) { return this._save(KEYS.RESERVATIONS, reservation, 'RES'); }
   
   getCompany(): CompanySettings { 
-    return {
-      name: 'AutoRent Azores Elite', address: 'Ponta Delgada, Açores', nif: '500123456', email: 'geral@autorentazores.pt'
-    };
+    return JSON.parse(localStorage.getItem(KEYS.COMPANY) || JSON.stringify(DEFAULT_COMPANY));
+  }
+
+  saveCompany(settings: CompanySettings) {
+    localStorage.setItem(KEYS.COMPANY, JSON.stringify(settings));
   }
 
   getMaintenance(carId?: string): MaintenanceRecord[] {

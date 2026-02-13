@@ -22,6 +22,7 @@ export function decode(base64: string): Uint8Array {
 
 /**
  * Decodes raw PCM audio bytes into an AudioBuffer with high precision scaling.
+ * Optimized for Gemini 2.5 Native Audio output (24kHz, 16-bit PCM).
  */
 export async function decodeAudioData(
   data: Uint8Array,
@@ -29,14 +30,18 @@ export async function decodeAudioData(
   sampleRate: number = 24000,
   numChannels: number = 1
 ): Promise<AudioBuffer> {
-  const dataInt16 = new Int16Array(data.buffer);
+  // Garantir que temos dados para processar
+  if (data.length === 0) return ctx.createBuffer(numChannels, 1, sampleRate);
+
+  // Convert Uint8Array buffer to Int16Array for PCM processing
+  const dataInt16 = new Int16Array(data.buffer, data.byteOffset, data.byteLength / 2);
   const frameCount = dataInt16.length / numChannels;
   const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
 
   for (let channel = 0; channel < numChannels; channel++) {
     const channelData = buffer.getChannelData(channel);
     for (let i = 0; i < frameCount; i++) {
-      // Usamos uma escala ligeiramente mais conservadora para evitar clipping digital em colunas de telemóvel
+      // Scale from Int16 (-32768 to 32767) to Float32 (-1.0 to 1.0)
       channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
     }
   }
@@ -47,7 +52,6 @@ export function createPcmBlob(data: Float32Array, sampleRate: number = 16000): {
   const l = data.length;
   const int16 = new Int16Array(l);
   for (let i = 0; i < l; i++) {
-    // Normalização básica para garantir que o áudio de entrada seja captado com clareza
     const s = Math.max(-1, Math.min(1, data[i]));
     int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
   }

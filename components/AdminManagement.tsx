@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { db } from '../services/mockDatabase';
-import { CarDetails, ReservationData, ServiceItem, MaintenanceRecord, AppPhase } from '../types';
+import { CarDetails, ReservationData, ServiceItem, MaintenanceRecord, AppPhase, CompanySettings } from '../types';
 import { CloudHub } from './CloudHub';
 import { DiagnosticDashboard } from './DiagnosticDashboard';
 import CameraCapture from './CameraCapture';
@@ -10,17 +10,46 @@ import { analyzeRegistrationCertificate } from '../services/geminiService';
 interface AdminManagementProps {
   onBack: () => void;
   lang: string;
+  initialAutoScan?: boolean;
 }
 
-type AdminTab = 'overview' | 'reservations' | 'fleet' | 'services' | 'system';
+type AdminTab = 'overview' | 'reservations' | 'fleet' | 'services' | 'settings' | 'system';
 
-export const AdminManagement: React.FC<AdminManagementProps> = ({ onBack, lang }) => {
-  const [activeTab, setActiveTab] = useState<AdminTab>('overview');
+const StatCard = ({ label, value, icon, color }: { label: string; value: string | number; icon: string; color: string }) => (
+  <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border dark:border-slate-800 shadow-sm hover:shadow-md transition-shadow">
+    <div className="flex justify-between items-start mb-4">
+      <div className={`w-12 h-12 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-2xl`}>
+        {icon}
+      </div>
+      <div className={`px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest bg-slate-100 dark:bg-slate-800 text-slate-400`}>
+        Live
+      </div>
+    </div>
+    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{label}</p>
+    <p className={`text-4xl font-black tracking-tighter ${color}`}>{value}</p>
+  </div>
+);
+
+const InputField = ({ label, value, onChange, type = 'text', placeholder = '' }: { label: string; value: string; onChange: (v: string) => void; type?: string; placeholder?: string }) => (
+  <div className="space-y-1 w-full">
+    <label className="text-[10px] font-black uppercase text-slate-400 ml-4 tracking-widest">{label}</label>
+    <input
+      type={type}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      className="w-full p-5 rounded-2xl bg-slate-50 dark:bg-slate-800 border-2 border-transparent focus:border-blue-600 transition-all font-bold outline-none text-slate-900 dark:text-white"
+    />
+  </div>
+);
+
+export const AdminManagement: React.FC<AdminManagementProps> = ({ onBack, lang, initialAutoScan = false }) => {
+  const [activeTab, setActiveTab] = useState<AdminTab>(initialAutoScan ? 'system' : 'overview');
   const [fleet, setFleet] = useState<CarDetails[]>([]);
   const [reservations, setReservations] = useState<ReservationData[]>([]);
   const [services, setServices] = useState<ServiceItem[]>([]);
+  const [company, setCompany] = useState<CompanySettings>(db.getCompany());
   
-  // Modals / Editors
   const [editingCar, setEditingCar] = useState<Partial<CarDetails> | null>(null);
   const [editingService, setEditingService] = useState<Partial<ServiceItem> | null>(null);
   const [maintenanceCar, setMaintenanceCar] = useState<CarDetails | null>(null);
@@ -31,11 +60,42 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({ onBack, lang }
     setFleet(db.getFleet());
     setReservations(db.getReservations());
     setServices(db.getServices());
+    setCompany(db.getCompany());
+  };
+
+  // Fix: Implemented missing handleOcr function to process car registration docs
+  const handleOcr = async (base64: string) => {
+    setOcrLoading(true);
+    try {
+      // Remove data URL prefix if present before sending to Gemini
+      const cleanBase64 = base64.includes(',') ? base64.split(',')[1] : base64;
+      const result = await analyzeRegistrationCertificate(cleanBase64);
+      if (result) {
+        setEditingCar(prev => ({
+          ...prev,
+          ...result
+        }));
+      }
+    } catch (error) {
+      console.error("OCR failed", error);
+    } finally {
+      setOcrLoading(false);
+    }
   };
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [initialAutoScan]);
+
+  const handleSaveCompany = (e: React.FormEvent) => {
+    e.preventDefault();
+    db.saveCompany(company);
+    alert("Configurações da empresa guardadas!");
+  };
+
+  const handleLogoUpload = (dataUrl: string) => {
+    setCompany(prev => ({ ...prev, logoUrl: dataUrl }));
+  };
 
   const handleSaveCar = (e: React.FormEvent) => {
     e.preventDefault();
@@ -64,15 +124,6 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({ onBack, lang }
     }
   };
 
-  const handleOcr = async (front: string, back?: string) => {
-    setOcrLoading(true);
-    const data = await analyzeRegistrationCertificate(front.split(',')[1], back?.split(',')[1]);
-    if (data) {
-      setEditingCar(prev => ({ ...prev, ...data }));
-    }
-    setOcrLoading(false);
-  };
-
   const stats = {
     totalRevenue: reservations.filter(r => r.status === 'confirmed' || r.status === 'completed').length * 150,
     activeRentals: reservations.filter(r => r.status === 'confirmed').length,
@@ -83,18 +134,20 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({ onBack, lang }
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 p-4 md:p-10 animate-in fade-in duration-500 overflow-y-auto no-scrollbar">
       <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-12">
-        <div>
-          <h1 className="text-4xl font-black tracking-tighter text-slate-900 dark:text-white">Admin Hub Elite</h1>
-          <p className="text-slate-400 font-bold uppercase text-[10px] tracking-[0.3em]">Fleet & Logistics Management</p>
+        <div className="flex items-center gap-6">
+          {company.logoUrl && <img src={company.logoUrl} className="h-16 w-auto object-contain bg-white p-2 rounded-xl shadow-sm" />}
+          <div>
+            <h1 className="text-4xl font-black tracking-tighter text-slate-900 dark:text-white">Admin Hub Elite</h1>
+            <p className="text-slate-400 font-bold uppercase text-[10px] tracking-[0.3em]">{company.name}</p>
+          </div>
         </div>
         <button onClick={onBack} className="bg-slate-900 text-white px-8 py-3 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-black active:scale-95 transition-all">
           Exit Panel
         </button>
       </header>
 
-      {/* TABS NAVIGATION */}
       <nav className="flex gap-2 p-1.5 bg-slate-200/50 dark:bg-slate-900/50 rounded-[2rem] w-fit mb-10 overflow-x-auto no-scrollbar">
-        {(['overview', 'reservations', 'fleet', 'services', 'system'] as AdminTab[]).map(tab => (
+        {(['overview', 'reservations', 'fleet', 'services', 'settings', 'system'] as AdminTab[]).map(tab => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -131,6 +184,45 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({ onBack, lang }
                 </div>
                 <CloudHub t={(k) => k} />
             </div>
+          </div>
+        )}
+
+        {activeTab === 'settings' && (
+          <div className="max-w-4xl animate-in slide-in-from-right-4">
+             <div className="mb-10">
+                <h3 className="text-2xl font-black tracking-tighter">Company Profile</h3>
+                <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest">Business Identity & Branding</p>
+             </div>
+             
+             <div className="grid grid-cols-1 md:grid-cols-3 gap-10">
+                <div className="space-y-6">
+                   <p className="text-[10px] font-black uppercase text-slate-400 ml-4 tracking-widest">Company Logo</p>
+                   <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border dark:border-slate-800 aspect-square flex flex-col items-center justify-center gap-4 group relative overflow-hidden">
+                      {company.logoUrl ? (
+                         <img src={company.logoUrl} className="w-full h-auto object-contain max-h-40" />
+                      ) : (
+                         <span className="text-4xl grayscale">🏢</span>
+                      )}
+                      <div className="absolute inset-0 bg-slate-950/40 backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                         <CameraCapture label="Upload Logo" onCapture={handleLogoUpload} />
+                      </div>
+                   </div>
+                   <p className="text-[8px] text-slate-400 text-center italic">Este logo aparecerá na App e nos PDFs gerados pelo Agente.</p>
+                </div>
+
+                <form onSubmit={handleSaveCompany} className="md:col-span-2 space-y-6">
+                   <InputField label="Company Name" value={company.name} onChange={v => setCompany({...company, name: v})} />
+                   <InputField label="Tax ID / NIF" value={company.nif} onChange={v => setCompany({...company, nif: v})} />
+                   <InputField label="Official Email" value={company.email} onChange={v => setCompany({...company, email: v})} />
+                   <InputField label="Headquarters Address" value={company.address} onChange={v => setCompany({...company, address: v})} />
+                   
+                   <div className="pt-6">
+                      <button type="submit" className="w-full bg-blue-600 text-white py-6 rounded-3xl font-black uppercase text-xs tracking-widest shadow-xl shadow-blue-500/20 active:scale-95 transition-all">
+                         Update Identity
+                      </button>
+                   </div>
+                </form>
+             </div>
           </div>
         )}
 
@@ -194,9 +286,7 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({ onBack, lang }
                   + Add New Item
                </button>
             </div>
-            
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                {/* INSURANCE TABLE */}
                 <div className="bg-white dark:bg-slate-900 rounded-[3rem] border dark:border-slate-800 overflow-hidden shadow-sm">
                   <div className="p-8 border-b dark:border-slate-800 flex justify-between items-center bg-blue-50/50 dark:bg-blue-900/10">
                     <h3 className="font-black text-xs uppercase tracking-widest text-blue-600">Insurance Policies</h3>
@@ -231,8 +321,6 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({ onBack, lang }
                     </tbody>
                   </table>
                 </div>
-
-                {/* EXTRAS TABLE */}
                 <div className="bg-white dark:bg-slate-900 rounded-[3rem] border dark:border-slate-800 overflow-hidden shadow-sm">
                   <div className="p-8 border-b dark:border-slate-800 flex justify-between items-center bg-green-50/50 dark:bg-green-900/10">
                     <h3 className="font-black text-xs uppercase tracking-widest text-green-600">Extras & Fees</h3>
@@ -292,7 +380,6 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({ onBack, lang }
                   {reservations.map(r => (
                     <tr key={r.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
                       <td className="px-8 py-6">
-                        {/* Fix: Access r.mainDriver.name instead of r.driverName */}
                         <p className="font-bold text-sm text-slate-900 dark:text-white">{r.mainDriver.name}</p>
                         <p className="text-[10px] text-slate-400 font-mono">{r.id}</p>
                       </td>
@@ -323,22 +410,19 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({ onBack, lang }
           </div>
         )}
 
-        {activeTab === 'system' && <DiagnosticDashboard />}
+        {activeTab === 'system' && <DiagnosticDashboard autoStart={initialAutoScan} />}
       </main>
 
-      {/* --- CAR EDITOR MODAL (OCR POWERED) --- */}
+      {/* MODALS */}
       {editingCar && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[110] flex items-center justify-center p-4 md:p-6 overflow-y-auto">
           <div className="bg-white dark:bg-slate-900 w-full max-w-5xl rounded-[3rem] p-8 md:p-12 shadow-2xl animate-in zoom-in duration-300 relative">
             <button onClick={() => setEditingCar(null)} className="absolute top-8 right-8 text-2xl opacity-50 hover:opacity-100 transition-opacity">✕</button>
-            
             <div className="mb-10">
                <h4 className="text-4xl font-black tracking-tighter">Fleet Asset Manager</h4>
                <p className="text-slate-400 font-black uppercase text-[10px] tracking-[0.3em]">Vehicle Registration & Identity Diagnostic</p>
             </div>
-
             <div className="grid grid-cols-1 lg:grid-cols-5 gap-12">
-               {/* LEFT SIDE: OCR & MEDIA */}
                <div className="lg:col-span-2 space-y-8">
                   <div className="p-8 bg-blue-50/50 dark:bg-blue-900/10 rounded-[2.5rem] border border-dashed border-blue-200 dark:border-blue-800 text-center">
                      <p className="text-xs font-black uppercase tracking-widest text-blue-600 mb-6 flex items-center justify-center gap-2">
@@ -352,38 +436,23 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({ onBack, lang }
                                 <span className="text-[10px] font-black uppercase tracking-widest">Gemini Analyzing Document...</span>
                             </div>
                         )}
-                        {!ocrLoading && (
-                            <p className="text-[10px] text-slate-400 font-medium">Scan the document to auto-fill all technical specifications below.</p>
-                        )}
                      </div>
                   </div>
-                  <InputField label="Visual Identity (Image URL)" value={editingCar.image || ''} onChange={(v: string) => setEditingCar({...editingCar, image: v})} placeholder="External CDN link for the car image" />
+                  <InputField label="Visual Identity (Image URL)" value={editingCar.image || ''} onChange={(v: string) => setEditingCar({...editingCar, image: v})} />
                </div>
-
-               {/* RIGHT SIDE: DATA FORM */}
                <form onSubmit={handleSaveCar} className="lg:col-span-3 space-y-6">
                   <div className="grid grid-cols-2 gap-6">
-                     <InputField label="Manufacturer / Brand" value={editingCar.brand || ''} onChange={(v: string) => setEditingCar({...editingCar, brand: v})} />
-                     <InputField label="Vehicle Model" value={editingCar.model || ''} onChange={(v: string) => setEditingCar({...editingCar, model: v})} />
+                     <InputField label="Brand" value={editingCar.brand || ''} onChange={(v: string) => setEditingCar({...editingCar, brand: v})} />
+                     <InputField label="Model" value={editingCar.model || ''} onChange={(v: string) => setEditingCar({...editingCar, model: v})} />
                   </div>
                   <div className="grid grid-cols-2 gap-6">
                      <InputField label="License Plate" value={editingCar.licensePlate || ''} onChange={(v: string) => setEditingCar({...editingCar, licensePlate: v})} />
-                     <InputField label="Chassis (VIN)" value={editingCar.vin || ''} onChange={(v: string) => setEditingCar({...editingCar, vin: v})} />
+                     <InputField label="VIN" value={editingCar.vin || ''} onChange={(v: string) => setEditingCar({...editingCar, vin: v})} />
                   </div>
-                  <div className="grid grid-cols-2 gap-6">
-                     <InputField label="Category / Segment" value={editingCar.category || ''} onChange={(v: string) => setEditingCar({...editingCar, category: v})} />
-                     <InputField label="Daily Rate (€)" value={editingCar.price || ''} onChange={(v: string) => setEditingCar({...editingCar, price: v})} />
-                  </div>
-                  <InputField label="Technical Specifications" value={editingCar.specs || ''} onChange={(v: string) => setEditingCar({...editingCar, specs: v})} placeholder="e.g. Hybrid, Auto, 4x4, 5 Seats" />
-                  
                   <div className="grid grid-cols-2 gap-6 pt-6">
                       <div className="space-y-1">
                           <label className="text-[10px] font-black uppercase text-slate-400 ml-4">Deployment Status</label>
-                          <select 
-                            className="w-full p-5 rounded-2xl bg-slate-50 dark:bg-slate-800 border-2 border-transparent focus:border-blue-600 transition-all font-bold outline-none appearance-none"
-                            value={editingCar.status}
-                            onChange={(e) => setEditingCar({...editingCar, status: e.target.value as any})}
-                          >
+                          <select className="w-full p-5 rounded-2xl bg-slate-50 dark:bg-slate-800 border-2 border-transparent focus:border-blue-600 transition-all font-bold outline-none appearance-none" value={editingCar.status} onChange={(e) => setEditingCar({...editingCar, status: e.target.value as any})}>
                               <option value="available">Active / Available</option>
                               <option value="rented">In Service / Rented</option>
                               <option value="maintenance">Under Repair / Maintenance</option>
@@ -392,7 +461,6 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({ onBack, lang }
                       </div>
                       <InputField label="Current Mileage (KM)" value={String(editingCar.currentOdometer || 0)} onChange={(v: string) => setEditingCar({...editingCar, currentOdometer: Number(v)})} type="number" />
                   </div>
-
                   <div className="flex gap-4 pt-10">
                      <button type="submit" className="flex-1 bg-blue-600 text-white py-6 rounded-3xl font-black uppercase text-xs tracking-widest shadow-2xl shadow-blue-500/40 hover:bg-blue-700 active:scale-95 transition-all">Synchronize Asset</button>
                      <button type="button" onClick={() => setEditingCar(null)} className="flex-1 bg-slate-100 dark:bg-slate-800 py-6 rounded-3xl font-black uppercase text-xs tracking-widest hover:bg-slate-200 transition-all">Cancel</button>
@@ -402,162 +470,6 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({ onBack, lang }
           </div>
         </div>
       )}
-
-      {/* --- SERVICE EDITOR MODAL --- */}
-      {editingService && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[110] flex items-center justify-center p-6">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-[3rem] p-12 shadow-2xl relative">
-            <button onClick={() => setEditingService(null)} className="absolute top-8 right-8 opacity-50 hover:opacity-100">✕</button>
-            <h4 className="text-3xl font-black tracking-tighter mb-10">Offer Configurator</h4>
-            <form onSubmit={handleSaveService} className="space-y-6">
-               <InputField label="Service Identity" value={editingService.name || ''} onChange={(v: string) => setEditingService({...editingService, name: v})} />
-               <InputField label="Short Description" value={editingService.description || ''} onChange={(v: string) => setEditingService({...editingService, description: v})} />
-               
-               <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                     <label className="text-[10px] font-black uppercase text-slate-400 ml-4">Classification</label>
-                     <select className="w-full p-5 bg-slate-50 dark:bg-slate-800 rounded-2xl font-bold outline-none" value={editingService.type} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setEditingService({...editingService, type: e.target.value as any})}>
-                        <option value="insurance">Insurance Policy</option>
-                        <option value="extra">Optional Extra</option>
-                        <option value="fee">Operational Fee</option>
-                     </select>
-                  </div>
-                  <InputField label="Base Unit Cost (€)" value={String(editingService.price || 0)} onChange={(v: string) => setEditingService({...editingService, price: Number(v)})} type="number" />
-               </div>
-
-               <div className="space-y-1">
-                  <label className="text-[10px] font-black uppercase text-slate-400 ml-4">Pricing Model</label>
-                  <div className="flex gap-2">
-                      {(['fixed', 'daily'] as const).map(model => (
-                          <button 
-                            key={model}
-                            type="button"
-                            onClick={() => setEditingService({...editingService, priceModel: model})}
-                            className={`flex-1 py-4 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all ${editingService.priceModel === model ? 'bg-slate-900 text-white shadow-xl' : 'bg-slate-100 dark:bg-slate-800 text-slate-400'}`}
-                          >
-                              {model === 'fixed' ? 'One-time Fee' : 'Per Day Rate'}
-                          </button>
-                      ))}
-                  </div>
-               </div>
-
-               {editingService.type === 'insurance' && (
-                   <div className="space-y-1">
-                       <label className="text-[10px] font-black uppercase text-slate-400 ml-4">Coverage Intelligence</label>
-                       <textarea 
-                         className="w-full p-5 bg-slate-50 dark:bg-slate-800 rounded-2xl font-bold outline-none h-24"
-                         value={editingService.coverageDetails || ''}
-                         onChange={(e) => setEditingService({...editingService, coverageDetails: e.target.value})}
-                         placeholder="Specific insurance fine print..."
-                       />
-                   </div>
-               )}
-
-               <button className="w-full bg-blue-600 text-white py-6 rounded-3xl font-black uppercase text-xs shadow-2xl shadow-blue-500/30 mt-6 active:scale-95 transition-all">Update Product</button>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* --- MAINTENANCE & LOGS MODAL --- */}
-      {maintenanceCar && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[110] flex items-center justify-center p-4 md:p-6 overflow-y-auto">
-           <div className="bg-white dark:bg-slate-900 w-full max-w-4xl rounded-[3rem] p-8 md:p-12 shadow-2xl relative">
-              <button onClick={() => setMaintenanceCar(null)} className="absolute top-8 right-8 text-2xl opacity-50">✕</button>
-              <h4 className="text-3xl font-black tracking-tighter mb-2">Fleet Logs: {maintenanceCar.brand} {maintenanceCar.model}</h4>
-              <p className="text-slate-400 font-black uppercase text-[10px] tracking-widest mb-10">Normalized Maintenance History & Incident Control</p>
-              
-              <div className="grid grid-cols-1 lg:grid-cols-5 gap-12">
-                  <div className="lg:col-span-3 space-y-4">
-                     <h5 className="text-xs font-black uppercase tracking-widest text-slate-400 mb-4">Historical Records</h5>
-                     <div className="space-y-3 max-h-[400px] overflow-y-auto pr-4 no-scrollbar">
-                        {db.getMaintenance(maintenanceCar.id).length === 0 ? (
-                           <div className="text-center py-20 bg-slate-50 dark:bg-slate-800/50 rounded-3xl border border-dashed border-slate-200 dark:border-slate-700">
-                               <p className="text-4xl mb-2">💎</p>
-                               <p className="text-[10px] font-black uppercase text-slate-400">Pristine Asset Condition</p>
-                           </div>
-                        ) : (
-                           db.getMaintenance(maintenanceCar.id).reverse().map(rec => (
-                              <div key={rec.id} className="p-6 bg-slate-50 dark:bg-slate-800 rounded-3xl flex justify-between items-center group hover:bg-white dark:hover:bg-slate-700 transition-all border border-transparent hover:border-blue-200 dark:hover:border-blue-800">
-                                 <div className="flex gap-4">
-                                    <div className="w-12 h-12 bg-white dark:bg-slate-900 rounded-2xl flex items-center justify-center shadow-sm">
-                                        <span className="text-xl">🛠️</span>
-                                    </div>
-                                    <div>
-                                       <p className="font-bold text-sm text-slate-900 dark:text-white">{rec.type}</p>
-                                       <p className="text-[10px] text-slate-400 font-medium">{rec.date} • {rec.odometer} KM</p>
-                                       <p className="text-[10px] text-slate-500 mt-1 italic">{rec.description}</p>
-                                    </div>
-                                 </div>
-                                 <div className="text-right">
-                                    <p className="font-black text-blue-600">{rec.cost}€</p>
-                                    <button onClick={() => db.deleteMaintenance(rec.id)} className="text-[9px] font-black uppercase text-red-500 hover:underline mt-2 opacity-0 group-hover:opacity-100 transition-opacity">Void</button>
-                                 </div>
-                              </div>
-                           ))
-                        )}
-                     </div>
-                  </div>
-
-                  <div className="lg:col-span-2 space-y-6">
-                      <h5 className="text-xs font-black uppercase tracking-widest text-blue-600 mb-4">New Entry Diagnostic</h5>
-                      <form onSubmit={handleSaveMaintenance} className="bg-slate-50 dark:bg-slate-800/50 p-6 rounded-[2.5rem] border dark:border-slate-800 space-y-4">
-                         <InputField label="Report Date" type="date" value={editingMaintenance?.date || ''} onChange={(v: string) => setEditingMaintenance({...editingMaintenance, date: v})} />
-                         <div className="space-y-1">
-                            <label className="text-[10px] font-black uppercase text-slate-400 ml-4">Intervention Type</label>
-                            <select 
-                                className="w-full p-4 bg-white dark:bg-slate-900 rounded-xl font-bold outline-none"
-                                value={editingMaintenance?.type || 'Preventiva'}
-                                onChange={(e) => setEditingMaintenance({...editingMaintenance, type: e.target.value as any})}
-                            >
-                                <option value="Preventiva">Preventive Check</option>
-                                <option value="Corretiva">Corrective Repair</option>
-                                <option value="IPO">Legal Inspection (IPO)</option>
-                                <option value="Pneus">Tires / Alignment</option>
-                                <option value="Limpeza">Sanitization / Detailing</option>
-                            </select>
-                         </div>
-                         <div className="grid grid-cols-2 gap-3">
-                            <InputField label="KM At Report" value={String(editingMaintenance?.odometer || 0)} onChange={(v: string) => setEditingMaintenance({...editingMaintenance, odometer: Number(v)})} type="number" />
-                            <InputField label="Unit Cost (€)" value={String(editingMaintenance?.cost || 0)} onChange={(v: string) => setEditingMaintenance({...editingMaintenance, cost: Number(v)})} type="number" />
-                         </div>
-                         <textarea 
-                            placeholder="Intervention technical details..."
-                            className="w-full p-4 bg-white dark:bg-slate-900 rounded-xl font-bold outline-none h-24 text-sm"
-                            value={editingMaintenance?.description || ''}
-                            onChange={(e) => setEditingMaintenance({...editingMaintenance, description: e.target.value})}
-                         />
-                         <button type="submit" className="w-full bg-slate-900 text-white py-5 rounded-2xl font-black uppercase text-xs tracking-widest active:scale-95 transition-all">Append To Fleet Log</button>
-                      </form>
-                  </div>
-              </div>
-           </div>
-        </div>
-      )}
     </div>
   );
 };
-
-const InputField = ({ label, value, onChange, type = "text", placeholder }: any) => (
-  <div className="space-y-1">
-    <label className="text-[10px] font-black uppercase text-slate-400 ml-4 tracking-tighter">{label}</label>
-    <input 
-      type={type} 
-      className="w-full p-5 rounded-2xl bg-slate-50 dark:bg-slate-800 border-2 border-transparent focus:border-blue-600 transition-all font-bold outline-none text-slate-900 dark:text-white placeholder:text-slate-300" 
-      value={value} 
-      onChange={(e) => onChange(e.target.value)}
-      placeholder={placeholder || `Enter ${label.toLowerCase()}...`}
-    />
-  </div>
-);
-
-const StatCard = ({ label, value, icon, color }: any) => (
-  <div className="bg-white dark:bg-slate-900 p-8 rounded-[3rem] shadow-sm border dark:border-slate-800 group hover:border-blue-500 transition-all overflow-hidden relative">
-    <div className={`absolute -bottom-10 -right-10 text-8xl opacity-[0.03] group-hover:scale-110 transition-transform duration-1000`}>{icon}</div>
-    <div className="flex justify-between items-start mb-4 relative z-10">
-      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{label}</p>
-      <span className="text-2xl group-hover:rotate-12 transition-transform">{icon}</span>
-    </div>
-    <div className={`text-5xl font-black ${color} tracking-tighter relative z-10`}>{value}</div>
-  </div>
-);

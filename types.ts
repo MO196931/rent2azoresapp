@@ -1,4 +1,5 @@
 
+
 export enum AppPhase {
   WELCOME = 'WELCOME',
   LOCATIONS = 'LOCATIONS',
@@ -28,11 +29,10 @@ export interface VehicleCheckinData {
   odometerPhoto?: string;
   odometerValue?: number;
   fuelLevel?: string;
+  interiorPhotos: string[];
+  exteriorPhotos: string[];
   damagePhotos: string[];
   isCompleteLater?: boolean;
-  interiorFront?: string;
-  exteriorFront?: string;
-  exteriorBack?: string;
   observations?: string;
 }
 
@@ -48,12 +48,13 @@ export interface ReservationData {
   accommodationName?: string;
   accommodationAddress?: string;
   accommodationPlaceId?: string;
+  // Added selectedCarId to fix type error in googleCalendar.ts
+  selectedCarId?: string;
   mainDriver: DriverInfo;
   additionalDrivers: DriverInfo[];
-  selectedCarId?: string;
   selectedExtras: string[];
   selectedInsuranceId?: string;
-  checkin?: VehicleCheckinData;
+  checkin: VehicleCheckinData;
   signature?: string;
   createdAt?: string;
 }
@@ -90,6 +91,7 @@ export interface CompanySettings {
   address: string;
   nif: string;
   email: string;
+  logoUrl?: string;
 }
 
 export interface AppNotification {
@@ -116,9 +118,9 @@ export interface ModuleHealth {
   status: 'healthy' | 'degraded' | 'failing';
   latency: number;
   errorCount: number;
+  lastTestMessage?: string;
 }
 
-// Added HealingAction interface to fix missing member error
 export interface HealingAction {
   id: string;
   module: ModuleName;
@@ -128,7 +130,6 @@ export interface HealingAction {
   timestamp: number;
 }
 
-// Added LearningMetric interface to fix missing member error
 export interface LearningMetric {
   topic: string;
   timestamp: number;
@@ -137,11 +138,10 @@ export interface LearningMetric {
 
 export interface HealthReport {
   lastCheck: string;
-  status: 'healthy' | 'degraded';
+  status: 'healthy' | 'degraded' | 'critical';
   issues: string[];
   stabilityScore: number;
   modules: ModuleHealth[];
-  // Updated to use HealingAction interface
   recentHeals: HealingAction[];
 }
 
@@ -159,6 +159,5 @@ export interface GoogleCalendar {
   id: string;
   summary: string;
   primary?: boolean;
-  // Added description to fix property not existing error
   description?: string;
 }
