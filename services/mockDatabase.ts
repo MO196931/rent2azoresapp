@@ -1,5 +1,5 @@
 
-import { CarDetails, ReservationData, CompanySettings, CarStatus, ServiceItem, MaintenanceRecord } from '../types';
+import { CarDetails, ReservationData, CompanySettings, CarStatus, ServiceItem, MaintenanceRecord, DriverRole } from '../types';
 
 const KEYS = {
   FLEET: 'autorent_db_fleet_v2',
@@ -7,7 +7,8 @@ const KEYS = {
   COMPANY: 'autorent_db_company_v2',
   SERVICES: 'autorent_db_services_v2',
   MAINTENANCE: 'autorent_db_maintenance_v2',
-  CLOUD_CONFIG: 'autorent_db_cloud_config_v2'
+  CLOUD_CONFIG: 'autorent_db_cloud_config_v2',
+  ROLES: 'autorent_db_roles_v2'
 };
 
 const INITIAL_FLEET: CarDetails[] = [
@@ -21,6 +22,12 @@ const INITIAL_FLEET: CarDetails[] = [
     price: '95€/dia', image: 'https://images.unsplash.com/photo-1533473359331-0135ef1b58bf?auto=format&fit=crop&q=80&w=400', 
     specs: 'Híbrido, Automático, 4x4', status: 'available', vin: '1C4JBA1234567', currentOdometer: 8200, fuelLevel: '100%'
   }
+];
+
+const INITIAL_ROLES: DriverRole[] = [
+  { id: 'r1', label: 'Condutor Principal', description: 'Titular da reserva e condutor habitual.', canSignContract: true, requiresId: true, isSystemRole: true },
+  { id: 'r2', label: 'Condutor Adicional', description: 'Autorizado a conduzir a viatura.', canSignContract: false, requiresId: true, isSystemRole: true },
+  { id: 'r3', label: 'Representante Legal', description: 'Responsável pela assinatura (ex: empresas).', canSignContract: true, requiresId: true, isSystemRole: true }
 ];
 
 const DEFAULT_COMPANY: CompanySettings = {
@@ -45,10 +52,19 @@ class MockDatabase {
     if (!localStorage.getItem(KEYS.FLEET)) localStorage.setItem(KEYS.FLEET, JSON.stringify(INITIAL_FLEET));
     if (!localStorage.getItem(KEYS.RESERVATIONS)) localStorage.setItem(KEYS.RESERVATIONS, JSON.stringify([]));
     if (!localStorage.getItem(KEYS.COMPANY)) localStorage.setItem(KEYS.COMPANY, JSON.stringify(DEFAULT_COMPANY));
+    if (!localStorage.getItem(KEYS.ROLES)) localStorage.setItem(KEYS.ROLES, JSON.stringify(INITIAL_ROLES));
   }
 
   private _get<T>(key: string): T[] {
-    return JSON.parse(localStorage.getItem(key) || '[]');
+    try {
+      const data = localStorage.getItem(key);
+      if (!data) return [];
+      const parsed = JSON.parse(data);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      console.error(`Error reading key ${key} from storage:`, e);
+      return [];
+    }
   }
 
   private _save<T extends { id?: string }>(key: string, item: T, prefix: string) {
@@ -66,7 +82,12 @@ class MockDatabase {
   }
 
   getCloudConfig(): CloudConfig {
-    return JSON.parse(localStorage.getItem(KEYS.CLOUD_CONFIG) || '{}');
+    try {
+      const data = localStorage.getItem(KEYS.CLOUD_CONFIG);
+      return data ? JSON.parse(data) : {};
+    } catch (e) {
+      return {};
+    }
   }
 
   saveCloudConfig(config: CloudConfig) {
@@ -79,11 +100,23 @@ class MockDatabase {
   saveReservation(reservation: ReservationData) { return this._save(KEYS.RESERVATIONS, reservation, 'RES'); }
   
   getCompany(): CompanySettings { 
-    return JSON.parse(localStorage.getItem(KEYS.COMPANY) || JSON.stringify(DEFAULT_COMPANY));
+    try {
+      const data = localStorage.getItem(KEYS.COMPANY);
+      return data ? JSON.parse(data) : DEFAULT_COMPANY;
+    } catch (e) {
+      return DEFAULT_COMPANY;
+    }
   }
 
   saveCompany(settings: CompanySettings) {
     localStorage.setItem(KEYS.COMPANY, JSON.stringify(settings));
+  }
+
+  getRoles(): DriverRole[] { return this._get(KEYS.ROLES); }
+  saveRole(role: DriverRole) { return this._save(KEYS.ROLES, role, 'ROL'); }
+  deleteRole(id: string) {
+    const items = this._get<any>(KEYS.ROLES).filter((i: any) => i.id !== id);
+    localStorage.setItem(KEYS.ROLES, JSON.stringify(items));
   }
 
   getMaintenance(carId?: string): MaintenanceRecord[] {

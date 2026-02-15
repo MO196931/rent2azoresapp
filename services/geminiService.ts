@@ -1,19 +1,19 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 
-const getAi = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
+const getAi = () => new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
 
 export async function analyzeDashboard(base64: string) {
     try {
         const ai = getAi();
         const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview',
-            contents: {
+            contents: [{
                 parts: [
                     { inlineData: { mimeType: 'image/jpeg', data: base64 } },
                     { text: "Analyze car dashboard. Extract total mileage (number only) and fuel level (text like 'Full', '1/2', '75%'). Return JSON." }
                 ]
-            },
+            }],
             config: {
                 responseMimeType: "application/json",
                 responseSchema: {
@@ -33,9 +33,6 @@ export async function analyzeDashboard(base64: string) {
     }
 }
 
-/**
- * Analyzes vehicle registration documents to extract technical specifications.
- */
 export async function analyzeRegistrationCertificate(frontBase64: string, backBase64?: string) {
     try {
         const ai = getAi();
@@ -47,11 +44,11 @@ export async function analyzeRegistrationCertificate(frontBase64: string, backBa
             parts.push({ inlineData: { mimeType: 'image/jpeg', data: backBase64 } });
         }
 
-        parts.push({ text: "Extract car details from this registration certificate: brand, model, licensePlate, vin, category, specs. Return JSON format matching the properties provided." });
+        parts.push({ text: "Extract car details from this registration certificate: brand, model, licensePlate, vin, category, specs. Return JSON format." });
 
         const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview',
-            contents: { parts },
+            contents: [{ parts }],
             config: {
                 responseMimeType: "application/json",
                 responseSchema: {

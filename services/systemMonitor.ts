@@ -7,43 +7,74 @@ class SystemMonitor {
   private stabilityScore: number = 100;
   private modules: Record<ModuleName, ModuleHealth>;
   private heals: HealingAction[] = [];
+  private permissions = { camera: 'unknown', microphone: 'unknown', geolocation: 'unknown' };
 
   constructor() {
     this.modules = this.initializeModules();
     this.loadPersistedData();
+    this.checkBrowserPermissions();
   }
 
   private loadPersistedData() {
-    const savedLogs = localStorage.getItem('system_monitor_logs');
-    if (savedLogs) this.logs = JSON.parse(savedLogs);
-    
-    const savedHeals = localStorage.getItem('system_monitor_heals');
-    if (savedHeals) this.heals = JSON.parse(savedHeals);
+    try {
+      const savedLogs = localStorage.getItem('system_monitor_logs');
+      if (savedLogs) this.logs = JSON.parse(savedLogs);
+      
+      const savedHeals = localStorage.getItem('system_monitor_heals');
+      if (savedHeals) this.heals = JSON.parse(savedHeals);
+    } catch (e) {
+      localStorage.removeItem('system_monitor_logs');
+    }
   }
 
   private persistData() {
-    localStorage.setItem('system_monitor_logs', JSON.stringify(this.logs.slice(0, 50)));
-    localStorage.setItem('system_monitor_heals', JSON.stringify(this.heals.slice(0, 20)));
+    try {
+      localStorage.setItem('system_monitor_logs', JSON.stringify(this.logs.slice(0, 50)));
+      localStorage.setItem('system_monitor_heals', JSON.stringify(this.heals.slice(0, 20)));
+    } catch (e) {}
   }
 
   private initializeModules(): Record<ModuleName, ModuleHealth> {
     const mods: any = {};
-    (['AI_CORE', 'AUDIO_SUBSYSTEM', 'NETWORK', 'DATABASE', 'USER_INTERFACE'] as ModuleName[]).forEach(m => {
+    (['AI_CORE', 'AUDIO_SUBSYSTEM', 'NETWORK', 'DATABASE', 'USER_INTERFACE', 'HARDWARE_LAYER'] as ModuleName[]).forEach(m => {
       mods[m] = { name: m, status: 'healthy', latency: 0, errorCount: 0 };
     });
     return mods;
   }
 
+  private async checkBrowserPermissions() {
+    if (typeof navigator === 'undefined' || !navigator.permissions) return;
+    try {
+      // Some browsers don't support 'camera' or 'microphone' queries via navigator.permissions
+      const cam = await navigator.permissions.query({ name: 'camera' as any }).catch(() => ({ state: 'prompt' }));
+      const mic = await navigator.permissions.query({ name: 'microphone' as any }).catch(() => ({ state: 'prompt' }));
+      const geo = await navigator.permissions.query({ name: 'geolocation' as any }).catch(() => ({ state: 'prompt' }));
+      this.permissions = { 
+        camera: cam.state, 
+        microphone: mic.state, 
+        geolocation: geo.state 
+      };
+    } catch (e) {}
+  }
+
   public logEvent(level: SystemLog['level'], component: string, message: string) {
-    const log: SystemLog = { id: Math.random().toString(36).substr(2, 9), timestamp: Date.now(), level, component, message, resolved: false };
+    const log: SystemLog = { 
+      id: Math.random().toString(36).substr(2, 9), 
+      timestamp: Date.now(), 
+      level, 
+      component, 
+      message, 
+      resolved: false 
+    };
     this.logs.unshift(log);
     
-    if (level === 'error' || level === 'fatal') {
-      const moduleName = this.mapComponentToModule(component);
+    const moduleName = this.mapComponentToModule(component);
+    if ((level === 'error' || level === 'fatal') && this.modules[moduleName]) {
       this.modules[moduleName].status = 'degraded';
       this.modules[moduleName].errorCount++;
       this.triggerAutoHeal(moduleName, message);
     }
+    
     this.calculateStabilityScore();
     if (this.logs.length > 50) this.logs.pop();
     this.persistData();
@@ -52,104 +83,91 @@ class SystemMonitor {
   private mapComponentToModule(component: string): ModuleName {
     const c = component.toUpperCase();
     if (c.includes('AI') || c.includes('GEMINI')) return 'AI_CORE';
-    if (c.includes('AUDIO') || c.includes('PCM') || c.includes('VOICE')) return 'AUDIO_SUBSYSTEM';
-    if (c.includes('NET') || c.includes('API') || c.includes('SOCKET')) return 'NETWORK';
-    if (c.includes('DB') || c.includes('STORAGE') || c.includes('LOCAL')) return 'DATABASE';
+    if (c.includes('AUDIO')) return 'AUDIO_SUBSYSTEM';
+    if (c.includes('NET')) return 'NETWORK';
+    if (c.includes('DB')) return 'DATABASE';
+    if (c.includes('CAM') || c.includes('MIC') || c.includes('GEO')) return 'HARDWARE_LAYER';
     return 'USER_INTERFACE';
   }
 
   public triggerAutoHeal(module: ModuleName, error: string) {
-    let action = "Automated Diagnostic Recovery";
-    let message = "Reparação concluída. Sistema estabilizado.";
-
-    switch(module) {
-      case 'AUDIO_SUBSYSTEM':
-        action = "Audio Stack Reset & Context Re-engagement";
-        message = "AudioContext reiniciado e buffers limpos.";
-        break;
-      case 'AI_CORE':
-        action = "Gemini Token Refresh & Model Re-handshake";
-        message = "Nova ligação à API solicitada.";
-        break;
-      case 'NETWORK':
-        action = "Exponential Backoff Reconnect";
-        message = "Ligação de rede refrescada.";
-        break;
-      case 'DATABASE':
-        action = "Storage Integrity Check & Repair";
-        message = "Índices da base de dados reconstruídos.";
-        break;
-    }
-
     const heal: HealingAction = {
       id: Math.random().toString(36).substr(2, 5),
       module,
-      action,
+      action: "Self-Correction Protocol Dispatched",
       timestamp: Date.now(),
       success: true,
-      resultMessage: message
+      resultMessage: "Estado do módulo reposto para parâmetros normais."
     };
-    
     this.heals.unshift(heal);
-    this.modules[module].status = 'healthy';
-    this.logEvent('info', 'AUTO_HEALER', `Módulo ${module} reparado via: ${action}`);
-    this.persistData();
+    if (this.modules[module]) this.modules[module].status = 'healthy';
   }
 
   private calculateStabilityScore() {
     const recentErrors = this.logs.filter(l => (l.level === 'error' || l.level === 'fatal') && (Date.now() - l.timestamp < 600000)).length;
-    this.stabilityScore = Math.max(0, 100 - (recentErrors * 10));
+    this.stabilityScore = Math.max(0, 100 - (recentErrors * 15));
   }
 
-  public getFullReport(): HealthReport {
-    this.calculateStabilityScore();
+  public getStorageUsage(): { used: number; total: number; percentage: number } {
+    let used = 0;
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key) {
+        used += (localStorage.getItem(key)?.length || 0) * 2; // approximation in bytes (UTF-16)
+      }
+    }
+    const total = 5 * 1024 * 1024; // Common 5MB localStorage limit
+    return {
+      used: Math.round(used / 1024), // KB
+      total: 5120, // KB
+      percentage: Math.min(100, Math.round((used / total) * 100))
+    };
+  }
+
+  public getInstantReport(): HealthReport {
+    const storage = this.getStorageUsage();
+    const memory = (performance as any).memory;
+    
     return {
       lastCheck: new Date().toISOString(),
       status: this.stabilityScore > 85 ? 'healthy' : this.stabilityScore > 50 ? 'degraded' : 'critical',
       issues: this.logs.filter(l => (l.level === 'error' || l.level === 'fatal') && !l.resolved).map(l => l.message),
       stabilityScore: this.stabilityScore,
       modules: Object.values(this.modules),
-      recentHeals: this.heals
+      recentHeals: this.heals,
+      permissions: this.permissions,
+      environment: {
+        online: typeof navigator !== 'undefined' ? navigator.onLine : true,
+        memory: memory ? memory.usedJSHeapSize : 0,
+        storageUsage: storage // Custom tracking
+      } as any
     };
+  }
+
+  public async getFullReport(): Promise<HealthReport> {
+    await this.checkBrowserPermissions();
+    let batteryInfo: any = { level: 100, charging: true };
+    if (typeof navigator !== 'undefined' && (navigator as any).getBattery) {
+      try {
+        const b = await (navigator as any).getBattery();
+        batteryInfo = { level: b.level * 100, charging: b.charging };
+      } catch (e) {}
+    }
+
+    const report = this.getInstantReport();
+    report.environment.batteryLevel = batteryInfo.level;
+    report.environment.isCharging = batteryInfo.charging;
+    return report;
   }
 
   public getLogs() { return this.logs; }
 
   public async runFullDiagnostic(): Promise<HealthReport> {
-    this.logEvent('info', 'DIAGNOSTIC', 'A iniciar suite completa de testes...');
-    
-    // Test 1: AI CORE
-    const aiStart = Date.now();
+    const start = Date.now();
     const aiRes = await checkSystemHealth();
-    this.modules['AI_CORE'].latency = Date.now() - aiStart;
+    this.modules['AI_CORE'].latency = Date.now() - start;
     this.modules['AI_CORE'].status = aiRes.status ? 'healthy' : 'degraded';
-    this.modules['AI_CORE'].lastTestMessage = aiRes.status ? "Gemini 2.5 Flash Online" : `Erro: ${aiRes.error}`;
-
-    // Test 2: Database
-    try {
-      localStorage.setItem('diag_test', 'ok');
-      this.modules['DATABASE'].status = 'healthy';
-      this.modules['DATABASE'].lastTestMessage = "Local Storage Read/Write OK";
-    } catch(e) {
-      this.modules['DATABASE'].status = 'failing';
-      this.logEvent('error', 'DATABASE', 'Falha no acesso ao LocalStorage');
-    }
-
-    // Test 3: Audio (Check Browser support)
-    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-    if (AudioContextClass) {
-      this.modules['AUDIO_SUBSYSTEM'].status = 'healthy';
-      this.modules['AUDIO_SUBSYSTEM'].lastTestMessage = "Web Audio API Compatível";
-    } else {
-      this.modules['AUDIO_SUBSYSTEM'].status = 'failing';
-      this.logEvent('fatal', 'AUDIO', 'Navegador não suporta Web Audio API');
-    }
-
-    // Test 4: Network
-    this.modules['NETWORK'].status = navigator.onLine ? 'healthy' : 'failing';
-    this.modules['NETWORK'].lastTestMessage = navigator.onLine ? "Ligação à Internet Ativa" : "Offline";
-
-    this.logEvent('info', 'DIAGNOSTIC', 'Suite de testes concluída.');
+    this.modules['AI_CORE'].lastTestMessage = aiRes.status ? 'Gemini API Responsiva' : aiRes.error;
     return this.getFullReport();
   }
 }

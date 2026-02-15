@@ -1,74 +1,71 @@
 
-import { AppPhase, ReservationData, CarDetails, SystemLog, AppNotification, VehicleCheckinData } from './types';
-import { decode, decodeAudioData, createPcmBlob } from './services/audioUtils';
-import { db } from './services/mockDatabase'; 
-import { GoogleGenAI, LiveServerMessage, Modality, Type } from '@google/genai';
-import { notificationManager } from './services/notificationManager';
-import ToastSystem from './components/ToastSystem';
-import CameraCapture from './components/CameraCapture';
-import SignaturePad from './components/SignaturePad';
-import { generateRentalContract } from './services/pdfService';
-import { AdminManagement } from './components/AdminManagement';
-import { googlePlatformService } from './services/googleCalendar';
 import React, { useState, useEffect, useRef } from 'react';
+import { AppPhase, ReservationData, AppNotification, SupportedLang } from './types';
+import { decode, decodeAudioData, createPcmBlob, unlockAudio } from './services/audioUtils';
+import { db } from './services/mockDatabase'; 
+import { GoogleGenAI, LiveServerMessage, Modality, Type, FunctionDeclaration } from '@google/genai';
+import { notificationManager } from './services/notificationManager';
+import { googlePlatformService } from './services/googleCalendar'; 
+import { TRANSLATIONS } from './translations';
+import ToastSystem from './components/ToastSystem';
+import SignaturePad from './components/SignaturePad';
+import { AdminManagement } from './components/AdminManagement';
+import { DiagnosticDashboard } from './components/DiagnosticDashboard';
+import { systemMonitor } from './services/systemMonitor';
 
 const DRAFT_KEY = 'autorent_current_draft';
 
-type InspectionCategory = 'odometer' | 'interior' | 'exterior' | 'damage';
-
 export default function App() {
   const [phase, setPhase] = useState<AppPhase>(AppPhase.WELCOME);
+  const [lang] = useState<SupportedLang>('pt');
+  const [healthStatus, setHealthStatus] = useState<'healthy' | 'degraded' | 'critical'>('healthy');
+  
+  const t = (key: string) => (TRANSLATIONS[lang] as any)[key] || key;
+
   const [isConnecting, setIsConnecting] = useState(false);
   const [connected, setConnected] = useState(false);
-  const [aiTranscript, setAiTranscript] = useState('');
-  const [activeCapture, setActiveCapture] = useState<'id' | 'license' | 'signature' | 'fleet' | 'inspection' | 'location' | 'terms' | null>(null);
-  const [inspectionCategory, setInspectionCategory] = useState<InspectionCategory>('odometer');
-  const [inspectionStep, setInspectionStep] = useState(0);
-  const [notifications, setNotifications] = useState<AppNotification[]>([]);
-  const [companyLogo, setCompanyLogo] = useState(db.getCompany().logoUrl);
-  const [userCoords, setUserCoords] = useState<{lat: number, lng: number} | null>(null);
-  const [hasDraft, setHasDraft] = useState(false);
-  
+  const [isModelSpeaking, setIsModelSpeaking] = useState(false);
+  const [audioLevel, setAudioLevel] = useState(0);
+
   const [reservation, setReservation] = useState<ReservationData>(() => {
     const saved = localStorage.getItem(DRAFT_KEY);
-    return saved ? JSON.parse(saved) : {
-      mainDriver: { name: '', email: '', phone: '' },
-      additionalDrivers: [],
-      selectedExtras: [],
-      status: 'draft',
-      checkin: { interiorPhotos: [], exteriorPhotos: [], damagePhotos: [] }
-    };
+    return saved ? JSON.parse(saved) : createEmptyReservation();
   });
+
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
 
   const outCtxRef = useRef<AudioContext | null>(null);
   const nextStartTimeRef = useRef<number>(0);
+  const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
+
+  function createEmptyReservation(): ReservationData {
+    return {
+      status: 'draft',
+      mainDriver: { name: '', email: '', phone: '' },
+      additionalDrivers: [],
+      selectedExtras: [],
+      checkin: { interiorPhotos: [], exteriorPhotos: [], damagePhotos: [] },
+    };
+  }
 
   useEffect(() => {
-    const saved = localStorage.getItem(DRAFT_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      // Only consider it a draft if at least some data exists
-      if (parsed.mainDriver?.name || parsed.pickupLocation || parsed.selectedCarId) {
-        setHasDraft(true);
-      }
-    }
-
-    const logInterval = setInterval(() => {
-      const currentCompany = db.getCompany();
-      if (currentCompany.logoUrl !== companyLogo) setCompanyLogo(currentCompany.logoUrl);
-    }, 1000);
-    
     const unsubscribe = notificationManager.subscribe((n) => {
       setNotifications(prev => [...prev, n as unknown as AppNotification]);
     });
+    
+    // Periodically check basic health for the UI indicator
+    const healthInterval = setInterval(() => {
+        const report = systemMonitor.getInstantReport();
+        setHealthStatus(report.status);
+    }, 5000);
 
-    navigator.geolocation.getCurrentPosition(
-      (pos) => setUserCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-      () => console.warn("Geo blocked")
-    );
-
-    return () => { clearInterval(logInterval); unsubscribe(); };
-  }, [companyLogo]);
+    return () => {
+        unsubscribe();
+        clearInterval(healthInterval);
+    };
+  }, []);
 
   useEffect(() => {
     if (reservation.status === 'draft') {
@@ -76,393 +73,269 @@ export default function App() {
     }
   }, [reservation]);
 
-  const aiTools = [
+  const aiTools: FunctionDeclaration[] = [
     {
-      name: 'update_reservation',
-      description: 'Atualiza dados da reserva (datas, horas, cliente, localizacao).',
+      name: 'set_reservation_info',
+      description: 'Define as informações da reserva. Chame sempre que o utilizador fornecer um dado como nome, email, data ou hora.',
       parameters: {
         type: Type.OBJECT,
         properties: {
-          name: { type: Type.STRING },
-          startDate: { type: Type.STRING },
-          endDate: { type: Type.STRING },
-          pickupLocation: { type: Type.STRING },
-          accommodationName: { type: Type.STRING }
+          name: { type: Type.STRING, description: 'Nome completo do condutor' },
+          email: { type: Type.STRING, description: 'Email de contacto' },
+          startDate: { type: Type.STRING, description: 'Data de levantamento (AAAA-MM-DD)' },
+          startTime: { type: Type.STRING, description: 'Hora exata de levantamento (HH:MM)' },
+          endDate: { type: Type.STRING, description: 'Data de devolução (AAAA-MM-DD)' },
+          endTime: { type: Type.STRING, description: 'Hora exata de devolução (HH:MM)' },
+          pickupLocation: { type: Type.STRING, description: 'Local de levantamento (ex: Aeroporto PDL)' }
         }
       }
     },
     {
-      name: 'request_ui_action',
-      description: 'Abre componentes visuais (frota, camera, termos).',
-      parameters: {
-        type: Type.OBJECT,
-        properties: {
-          action: { type: Type.STRING, enum: ['id_capture', 'signature_pad', 'show_fleet', 'inspection', 'location_search', 'show_terms'] }
-        },
-        required: ['action']
-      }
+      name: 'confirm_and_close',
+      description: 'Chame quando todos os dados estiverem recolhidos e o utilizador confirmar que estão corretos.',
+      parameters: { type: Type.OBJECT, properties: {} }
     }
   ];
 
-  const handleStartSession = async (isResuming: boolean = false) => {
+  const handleVoiceSession = async () => {
+    if (connected) return;
     setIsConnecting(true);
+
     try {
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
+      
+      if (!outCtxRef.current) {
+        outCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+      }
+      await unlockAudio(outCtxRef.current);
+
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      outCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-      await outCtxRef.current.resume();
+      const inCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+      const source = inCtx.createMediaStreamSource(stream);
+      const analyser = inCtx.createAnalyser();
+      analyser.fftSize = 256;
+      source.connect(analyser);
+      analyserRef.current = analyser;
 
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      const inputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-      const processor = inputCtx.createScriptProcessor(4096, 1, 1);
-
-      // Enhanced Context for the AI to handle resumes perfectly
-      const resumeContext = isResuming 
-        ? `IMPORTANTE: O cliente está a RETOMAR uma reserva anterior. 
-           DADOS ATUAIS NO SISTEMA:
-           - Cliente: ${reservation.mainDriver?.name || 'Não definido'}
-           - Carro: ${reservation.selectedCarId || 'Não escolhido'}
-           - Local: ${reservation.pickupLocation || 'Não definido'}
-           - Vistoria: ${reservation.checkin?.odometerPhoto ? 'Iniciada' : 'Não iniciada'}
-           
-           Dá as boas vindas de volta pelo nome (se souberes) e pergunta se quer continuar do ponto onde parou.` 
-        : `Esta é uma nova reserva. Começa com uma saudação calorosa dos Açores e pergunta o nome do cliente.`;
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      const updateVisualizer = () => {
+        if (!analyserRef.current) return;
+        analyserRef.current.getByteFrequencyData(dataArray);
+        const avg = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
+        setAudioLevel(avg);
+        animationFrameRef.current = requestAnimationFrame(updateVisualizer);
+      };
+      updateVisualizer();
 
       const sessionPromise = ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
         config: {
           responseModalities: [Modality.AUDIO],
-          tools: [{ googleMaps: {} }, { functionDeclarations: aiTools }],
-          toolConfig: userCoords ? { retrievalConfig: { latLng: { latitude: userCoords.lat, longitude: userCoords.lng } } } : undefined,
-          systemInstruction: `És o Agente Virtual da AutoRent Azores. Falas de forma profissional mas acolhedora.
-          ${resumeContext}
-          
-          FLUXO OBRIGATÓRIO:
-          1. Validar Datas e Nome do condutor principal.
-          2. Validar Localização (Hotel/Alojamento) usando Google Maps.
-          3. Mostrar Frota (request_ui_action: 'show_fleet').
-          4. Pedir ID/Documentos (request_ui_action: 'id_capture').
-          5. Guia para Vistoria Completa (request_ui_action: 'inspection').
-          6. Mostrar Termos Legais (request_ui_action: 'show_terms').
-          7. Recolher Assinatura Final.`
+          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } },
+          tools: [{ functionDeclarations: aiTools }],
+          systemInstruction: 'É o Agente de Reservas da AutoRent Azores. Seu objetivo é recolher: Nome, Data e Hora de Início, Data e Hora de Fim.'
         },
         callbacks: {
-          onopen: () => { setConnected(true); setIsConnecting(false); },
+          onopen: () => {
+            setConnected(true);
+            setIsConnecting(false);
+            const processor = inCtx.createScriptProcessor(4096, 1, 1);
+            processor.onaudioprocess = (e) => {
+              const input = e.inputBuffer.getChannelData(0);
+              sessionPromise.then(s => s.sendRealtimeInput({ media: createPcmBlob(input) }));
+            };
+            source.connect(processor);
+            processor.connect(inCtx.destination);
+          },
           onmessage: async (msg: LiveServerMessage) => {
-            if (msg.serverContent?.outputTranscription) setAiTranscript(msg.serverContent.outputTranscription.text);
+            if (msg.serverContent?.interrupted) {
+              sourcesRef.current.forEach(s => { try { s.stop(); } catch(e){} });
+              sourcesRef.current.clear();
+              nextStartTimeRef.current = 0;
+              setIsModelSpeaking(false);
+              return;
+            }
 
-            if (msg.toolCall) {
-              for (const fc of msg.toolCall.functionCalls) {
-                if (fc.name === 'update_reservation') {
-                   const args = fc.args as any;
-                   setReservation(prev => ({ 
-                     ...prev, 
-                     mainDriver: { ...prev.mainDriver, name: args.name || prev.mainDriver.name },
-                     startDate: args.startDate || prev.startDate,
-                     endDate: args.endDate || prev.endDate,
-                     pickupLocation: args.pickupLocation || prev.pickupLocation,
-                     accommodationName: args.accommodationName || prev.accommodationName
-                   }));
-                   sessionPromise.then(s => s.sendToolResponse({ functionResponses: { id: fc.id, name: fc.name, response: { result: "Dados atualizados no rascunho." } } }));
-                }
-                if (fc.name === 'request_ui_action') {
-                   const { action } = fc.args as any;
-                   if (action === 'id_capture') setActiveCapture('id');
-                   if (action === 'show_fleet') setActiveCapture('fleet');
-                   if (action === 'inspection') { 
-                     setActiveCapture('inspection'); 
-                     setInspectionCategory('odometer');
-                     setInspectionStep(0); 
-                   }
-                   if (action === 'location_search') setActiveCapture('location');
-                   if (action === 'show_terms') setActiveCapture('terms');
-                   sessionPromise.then(s => s.sendToolResponse({ functionResponses: { id: fc.id, name: fc.name, response: { result: "Interface aberta para o cliente." } } }));
+            if (msg.serverContent?.modelTurn?.parts) {
+              for (const part of msg.serverContent.modelTurn.parts) {
+                if (part.inlineData?.data) {
+                  setIsModelSpeaking(true);
+                  const buffer = await decodeAudioData(decode(part.inlineData.data), outCtxRef.current!, 24000, 1);
+                  nextStartTimeRef.current = Math.max(nextStartTimeRef.current, outCtxRef.current!.currentTime);
+                  const node = outCtxRef.current!.createBufferSource();
+                  node.buffer = buffer;
+                  node.connect(outCtxRef.current!.destination);
+                  node.start(nextStartTimeRef.current);
+                  nextStartTimeRef.current += buffer.duration;
+                  sourcesRef.current.add(node);
+                  node.onended = () => {
+                    sourcesRef.current.delete(node);
+                    if (sourcesRef.current.size === 0) setIsModelSpeaking(false);
+                  };
                 }
               }
             }
 
-            const audioData = msg.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
-            if (audioData && outCtxRef.current) {
-              const buf = await decodeAudioData(decode(audioData), outCtxRef.current);
-              const src = outCtxRef.current.createBufferSource();
-              src.buffer = buf; src.connect(outCtxRef.current.destination);
-              src.start(nextStartTimeRef.current);
-              nextStartTimeRef.current = Math.max(nextStartTimeRef.current, outCtxRef.current.currentTime) + buf.duration;
+            if (msg.toolCall) {
+              const s = await sessionPromise;
+              for (const fc of msg.toolCall.functionCalls) {
+                if (fc.name === 'set_reservation_info') {
+                  const args = fc.args as any;
+                  setReservation(prev => ({
+                    ...prev,
+                    mainDriver: { ...prev.mainDriver, name: args.name || prev.mainDriver.name, email: args.email || prev.mainDriver.email },
+                    startDate: args.startDate || prev.startDate,
+                    startTime: args.startTime || prev.startTime,
+                    endDate: args.endDate || prev.endDate,
+                    endTime: args.endTime || prev.endTime,
+                    pickupLocation: args.pickupLocation || prev.pickupLocation
+                  }));
+                  s.sendToolResponse({ functionResponses: { id: fc.id, name: fc.name, response: { result: "ok" } } });
+                }
+                if (fc.name === 'confirm_and_close') {
+                  setPhase(AppPhase.DETAILS);
+                  s.sendToolResponse({ functionResponses: { id: fc.id, name: fc.name, response: { result: "ok" } } });
+                }
+              }
             }
-          }
+          },
+          onerror: () => { setConnected(false); setIsConnecting(false); },
+          onclose: () => { setConnected(false); setIsConnecting(false); }
         }
       });
 
-      const source = inputCtx.createMediaStreamSource(stream);
-      processor.onaudioprocess = (e) => {
-        const data = e.inputBuffer.getChannelData(0);
-        if (connected) sessionPromise.then(s => s.sendRealtimeInput({ media: createPcmBlob(data) }));
-      };
-      source.connect(processor); processor.connect(inputCtx.destination);
-    } catch (e) { setIsConnecting(false); }
-  };
-
-  const handleReset = () => {
-    if (confirm("Tens a certeza que queres apagar o rascunho atual e começar do zero?")) {
-      localStorage.removeItem(DRAFT_KEY);
-      window.location.reload();
+    } catch (err) {
+      console.error("AI Error:", err);
+      setIsConnecting(false);
     }
   };
 
-  const handleCapture = (dataUrl: string) => {
-    if (activeCapture === 'id') {
-      setReservation(prev => ({ ...prev, mainDriver: { ...prev.mainDriver, docFront: dataUrl } }));
-      setActiveCapture(null);
+  const finalizeReservation = async (signature: string) => {
+    const finalData = { ...reservation, signature, status: 'confirmed' as const, createdAt: new Date().toISOString() };
+    setReservation(finalData);
+    
+    const config = db.getCloudConfig();
+    if (config.clientId && config.spreadsheetId) {
+      try {
+        await googlePlatformService.loadScripts(config.clientId, process.env.API_KEY || '');
+        await googlePlatformService.appendToSheet(config.spreadsheetId, finalData);
+      } catch (e) { console.warn("Cloud sync failed."); }
     }
     
-    if (activeCapture === 'inspection') {
-      setReservation(prev => {
-        const newCheckin = { ...prev.checkin };
-        
-        if (inspectionCategory === 'odometer') {
-          newCheckin.odometerPhoto = dataUrl;
-          setInspectionCategory('interior');
-          setInspectionStep(0);
-        } else if (inspectionCategory === 'interior') {
-          newCheckin.interiorPhotos = [...(newCheckin.interiorPhotos || []), dataUrl];
-          if (inspectionStep < 4) {
-            setInspectionStep(prevStep => prevStep + 1);
-          } else {
-            setInspectionCategory('exterior');
-            setInspectionStep(0);
-          }
-        } else if (inspectionCategory === 'exterior') {
-          newCheckin.exteriorPhotos = [...(newCheckin.exteriorPhotos || []), dataUrl];
-          if (inspectionStep < 3) {
-            setInspectionStep(prevStep => prevStep + 1);
-          } else {
-            setInspectionCategory('damage');
-            setInspectionStep(0);
-          }
-        } else if (inspectionCategory === 'damage') {
-          newCheckin.damagePhotos = [...(newCheckin.damagePhotos || []), dataUrl];
-          if (inspectionStep < 4) {
-            setInspectionStep(prevStep => prevStep + 1);
-          } else {
-            setActiveCapture(null);
-          }
-        }
-        
-        return { ...prev, checkin: newCheckin };
-      });
-    }
-  };
-
-  const getInspectionLabel = () => {
-    switch(inspectionCategory) {
-      case 'odometer': return 'Foto do Odómetro';
-      case 'interior': return `Vistoria Interior: Foto ${inspectionStep + 1} de 5`;
-      case 'exterior': return `Vistoria Exterior: Foto ${inspectionStep + 1} de 4`;
-      case 'damage': return `Danos Visíveis: Foto ${inspectionStep + 1} de 5 (Opcional)`;
-    }
-  };
-
-  const handleSign = async (sig: string) => {
-    const finalReservation = { ...reservation, signature: sig, status: 'confirmed' as const };
-    setReservation(finalReservation);
-    setActiveCapture(null);
-    const car = db.getFleet().find(c => c.id === reservation.selectedCarId) || db.getFleet()[0];
-    await generateRentalContract(finalReservation, db.getCompany(), car, sig);
-    localStorage.removeItem(DRAFT_KEY);
     setPhase(AppPhase.COMPLETED);
+    localStorage.removeItem(DRAFT_KEY);
   };
-
-  const TERMS_CONTENT = `
-    1. SEGUROS: A viatura inclui seguro contra terceiros. Franquia de 800€.
-    2. COMBUSTÍVEL: A viatura deve ser entregue com o mesmo nível recebido.
-    3. CONDUTOR: Apenas os condutores declarados podem conduzir.
-    4. MULTAS: São da inteira responsabilidade do locatário.
-    5. ASSISTÊNCIA: Em caso de avaria, contactar o número +351 900 000 000.
-  `;
-
-  if (phase === AppPhase.ADMIN_DASHBOARD) return <AdminManagement onBack={() => setPhase(AppPhase.WELCOME)} lang="pt" />;
-
-  if (phase === AppPhase.COMPLETED) {
-    return (
-      <div className="min-h-screen bg-white dark:bg-slate-950 flex flex-col items-center justify-center p-10 text-center space-y-8 animate-in zoom-in duration-500">
-        <div className="w-32 h-32 bg-green-500 rounded-full flex items-center justify-center text-6xl text-white shadow-2xl animate-bounce">✓</div>
-        <h1 className="text-4xl font-black tracking-tighter">Reserva Concluída!</h1>
-        <p className="text-slate-500 max-w-sm font-medium">O rascunho foi limpo e o contrato foi gerado.</p>
-        <button onClick={() => window.location.reload()} className="px-10 py-5 bg-blue-600 text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl active:scale-95 transition-all">Nova Reserva</button>
-      </div>
-    );
-  }
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white flex flex-col font-sans overflow-hidden">
-      <header className="p-6 flex justify-between items-center bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border-b dark:border-slate-800 z-50">
-         <div className="flex items-center gap-3">
-            <div className={`w-3 h-3 rounded-full ${connected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
-            <span className="font-black italic text-xl tracking-tighter uppercase">AUTORENT AZORES</span>
-         </div>
-         <div className="flex gap-2">
-            {hasDraft && !connected && (
-              <button onClick={handleReset} className="px-4 py-2 bg-red-50 text-red-600 rounded-full text-[10px] font-black uppercase border border-red-100">
-                Limpar Rascunho
-              </button>
-            )}
-            <button onClick={() => setPhase(AppPhase.ADMIN_DASHBOARD)} className="px-4 py-2 bg-slate-100 dark:bg-slate-800 rounded-full text-[10px] font-black uppercase">Painel</button>
-         </div>
-      </header>
-
-      <main className="flex-1 flex flex-col items-center justify-center p-8 relative">
-        {!connected ? (
-          <div className="max-w-xl w-full text-center space-y-10 animate-in fade-in duration-700">
-            <div className="space-y-4">
-              <h1 className="text-6xl font-black tracking-tighter leading-none">Vem descobrir os Açores.</h1>
-              <p className="text-slate-400 font-bold uppercase tracking-[0.2em] text-xs">Agente Inteligente AutoRent Azores</p>
-            </div>
-            
-            <div className="flex flex-col gap-6">
-              {hasDraft && (
-                <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border-2 border-blue-500 shadow-2xl animate-in slide-in-from-top-4">
-                   <p className="text-[10px] font-black uppercase tracking-widest text-blue-600 mb-4">Reserva em curso detectada</p>
-                   <div className="flex justify-between items-center mb-6 text-left">
-                      <div>
-                        <p className="text-lg font-black">{reservation.mainDriver.name || 'Cliente sem nome'}</p>
-                        <p className="text-xs text-slate-400 font-medium">
-                          {reservation.selectedCarId ? 'Carro Escolhido' : 'Pendente de Viatura'}
-                        </p>
-                      </div>
-                      <div className="text-right">
-                         <p className="text-[10px] font-bold text-slate-400">Progresso</p>
-                         <p className="text-sm font-black text-blue-600">
-                            {reservation.checkin.odometerPhoto ? '75%' : '30%'}
-                         </p>
-                      </div>
-                   </div>
-                   <button 
-                    onClick={() => handleStartSession(true)} 
-                    className="w-full py-6 bg-blue-600 text-white rounded-[2rem] font-black text-xl shadow-xl active:scale-95 transition-all animate-pulse-blue"
-                  >
-                    Retomar Reserva
-                  </button>
-                </div>
-              )}
-
-              <button 
-                onClick={() => handleStartSession(false)} 
-                className={`w-full py-8 ${hasDraft ? 'bg-slate-200 dark:bg-slate-800 text-slate-500' : 'bg-blue-600 text-white shadow-2xl'} rounded-[2.5rem] font-black text-2xl active:scale-95 transition-all`}
-              >
-                {hasDraft ? 'Iniciar Nova Reserva' : 'Começar Agora'}
-              </button>
-            </div>
-
-            <p className="text-[10px] text-slate-400 max-w-xs mx-auto font-medium leading-relaxed">
-              Ao iniciar, concorda que o seu progresso será guardado automaticamente para que possa continuar mais tarde.
-            </p>
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col">
+      <ToastSystem notifications={notifications} onRemove={(id) => setNotifications(n => n.filter(i => i.id !== id))} />
+      
+      {/* Dynamic Health Header */}
+      <div className="pt-4 px-6 flex justify-between items-center z-50">
+          <div 
+            onClick={() => setPhase(AppPhase.DIAGNOSTIC)}
+            className="flex items-center gap-2 px-3 py-1.5 bg-white/50 dark:bg-slate-900/50 backdrop-blur rounded-full border border-slate-200 dark:border-slate-800 cursor-pointer hover:bg-white dark:hover:bg-slate-800 transition-all shadow-sm group"
+          >
+              <div className={`w-2 h-2 rounded-full ${healthStatus === 'healthy' ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]' : healthStatus === 'degraded' ? 'bg-amber-500' : 'bg-red-500 animate-pulse'}`}></div>
+              <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400 group-hover:text-blue-600">Sistema: {healthStatus === 'healthy' ? 'Operacional' : 'Check Required'}</span>
           </div>
-        ) : (
-          <div className="max-w-xl w-full text-center space-y-8 animate-in slide-in-from-bottom-8">
-             <div className="p-8 bg-white dark:bg-slate-900 border-2 border-blue-100 dark:border-slate-800 rounded-[2.5rem] shadow-2xl relative">
-                <div className="absolute -top-3 left-10 px-4 py-1 bg-blue-600 text-white text-[8px] font-black uppercase tracking-widest rounded-full">Agente em Directo</div>
-                <p className="text-2xl font-bold italic leading-tight text-slate-800 dark:text-slate-100">"{aiTranscript || "Diga 'Olá' para começar..."}"</p>
-             </div>
-             
-             <div className="grid grid-cols-2 gap-4">
-                <div className={`p-5 rounded-3xl border-2 transition-all ${reservation.pickupLocation ? 'bg-green-50 border-green-200 text-green-700' : 'bg-white dark:bg-slate-900 border-transparent opacity-40'}`}>
-                   <p className="text-[9px] font-black uppercase tracking-widest mb-1">Localização</p>
-                   <p className="text-xs font-bold truncate">{reservation.pickupLocation || 'A aguardar...'}</p>
-                </div>
-                <div className={`p-5 rounded-3xl border-2 transition-all ${reservation.selectedCarId ? 'bg-green-50 border-green-200 text-green-700' : 'bg-white dark:bg-slate-900 border-transparent opacity-40'}`}>
-                   <p className="text-[9px] font-black uppercase tracking-widest mb-1">Veículo</p>
-                   <p className="text-xs font-bold">{reservation.selectedCarId ? 'Confirmado' : 'Por escolher'}</p>
-                </div>
-             </div>
+          <button onClick={() => setPhase(AppPhase.ADMIN_DASHBOARD)} className="w-8 h-8 flex items-center justify-center bg-white dark:bg-slate-900 rounded-full border border-slate-200 dark:border-slate-800 shadow-sm opacity-60 hover:opacity-100 transition-opacity">⚙️</button>
+      </div>
+
+      <main className="flex-1 container mx-auto px-4 pb-12 flex flex-col">
+        {phase === AppPhase.WELCOME && (
+          <div className="flex-1 flex flex-col items-center justify-center text-center p-6 space-y-12">
+            <div className="space-y-4 animate-in fade-in slide-in-from-top-4 duration-700">
+              <div className="w-20 h-20 bg-blue-600 rounded-3xl flex items-center justify-center text-3xl shadow-2xl mx-auto transform hover:rotate-6 transition-transform">🚗</div>
+              <h1 className="text-4xl font-black italic uppercase text-slate-900 dark:text-white tracking-tighter">AutoRent Azores</h1>
+              <p className="text-slate-400 font-bold text-[10px] uppercase tracking-[0.3em]">AI Concierge Premium</p>
+            </div>
+
+            <div className="relative">
+                <button 
+                  onClick={handleVoiceSession}
+                  disabled={isConnecting}
+                  className={`w-24 h-24 rounded-full flex items-center justify-center transition-all duration-500 shadow-2xl z-10 relative ${connected ? 'bg-red-500 scale-110' : 'bg-blue-600 hover:scale-105'} ${isConnecting ? 'opacity-50' : ''}`}
+                >
+                  {isConnecting ? <span className="animate-spin text-white">⏳</span> : <span className="text-3xl text-white">{connected ? '⏹️' : '🎙️'}</span>}
+                </button>
+                {connected && (
+                    <div className="absolute -inset-10 border-2 border-blue-500/20 rounded-full animate-ping pointer-events-none"></div>
+                )}
+            </div>
+
+            <div className="space-y-6 flex flex-col items-center">
+                {connected && (
+                  <div className="flex gap-1 h-8 items-center justify-center animate-in fade-in duration-300">
+                    {[...Array(12)].map((_, i) => (
+                      <div key={i} className="w-1.5 bg-blue-600 rounded-full transition-all duration-75" style={{ height: `${Math.max(8, audioLevel * Math.random() * 3)}%` }}></div>
+                    ))}
+                  </div>
+                )}
+                
+                <p className="text-slate-400 text-sm italic max-w-xs font-medium opacity-80">
+                  "Gostaria de alugar um carro em Ponta Delgada para o próximo fim de semana."
+                </p>
+
+                <button 
+                  onClick={() => setPhase(AppPhase.DIAGNOSTIC)}
+                  className="px-6 py-3 bg-slate-200 dark:bg-slate-800 text-slate-950 dark:text-white rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-3 hover:bg-slate-300 dark:hover:bg-slate-700 transition-all border-2 border-transparent hover:border-blue-500"
+                >
+                  <span>🩺</span> Testar Saúde do Sistema
+                </button>
+            </div>
           </div>
         )}
-      </main>
 
-      {/* MODALS (Termos, Localização, Câmara, Assinatura, Frota) */}
-      {activeCapture === 'terms' && (
-        <div className="fixed inset-0 z-[110] bg-slate-950/90 backdrop-blur-xl flex items-center justify-center p-6 animate-in zoom-in">
-           <div className="bg-white dark:bg-slate-900 w-full max-w-md p-8 rounded-[3rem] shadow-2xl border dark:border-slate-800">
-              <h3 className="text-2xl font-black tracking-tighter mb-4">Condições Gerais</h3>
-              <div className="bg-slate-50 dark:bg-slate-800 p-6 rounded-2xl h-64 overflow-y-auto mb-6 text-[11px] leading-relaxed text-slate-600 dark:text-slate-400 font-medium">
-                 {TERMS_CONTENT}
-              </div>
-              <button onClick={() => setActiveCapture('signature')} className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all">Aceitar e Assinar</button>
-           </div>
-        </div>
-      )}
-
-      {activeCapture === 'location' && (
-        <div className="fixed inset-0 z-[110] bg-slate-950/90 backdrop-blur-xl flex items-center justify-center p-6">
-           <div className="bg-white dark:bg-slate-900 w-full max-w-md p-8 rounded-[3rem] shadow-2xl">
-              <h3 className="text-2xl font-black mb-4 tracking-tighter">Onde está alojado?</h3>
-              <input 
-                autoFocus
-                type="text" 
-                placeholder="Nome do Hotel ou Morada..." 
-                className="w-full p-5 bg-slate-100 dark:bg-slate-800 rounded-2xl outline-none font-bold border-2 border-transparent focus:border-blue-500 transition-all"
-                onChange={(e) => setReservation(prev => ({ ...prev, pickupLocation: e.target.value }))}
-              />
-              <button onClick={() => setActiveCapture(null)} className="mt-6 w-full py-5 bg-slate-900 dark:bg-blue-600 text-white rounded-2xl font-black uppercase tracking-widest">Confirmar Local</button>
-           </div>
-        </div>
-      )}
-
-      {activeCapture && (activeCapture === 'id' || activeCapture === 'inspection') && (
-        <div className="fixed inset-0 z-[120] bg-slate-950 flex items-center justify-center p-6">
-           <div className="w-full max-w-md">
-             <CameraCapture 
-               label={activeCapture === 'inspection' ? getInspectionLabel() : 'Validar Identidade'} 
-               onCapture={handleCapture} 
-             />
-             <div className="flex gap-4 mt-6">
-                {activeCapture === 'inspection' && inspectionCategory === 'damage' && (
-                  <button onClick={() => setActiveCapture(null)} className="flex-1 py-5 bg-green-600 text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-lg">Finalizar Vistoria</button>
-                )}
-                <button onClick={() => setActiveCapture(null)} className="flex-1 text-white/50 text-[10px] font-black uppercase tracking-widest border-2 border-white/10 rounded-2xl py-5 hover:bg-white/5">Cancelar</button>
+        {phase === AppPhase.DIAGNOSTIC && (
+           <div className="py-8 animate-in fade-in slide-in-from-bottom-8 duration-500">
+             <div className="flex justify-between items-center mb-10">
+                <button onClick={() => setPhase(AppPhase.WELCOME)} className="text-slate-500 font-black text-[10px] uppercase tracking-widest hover:text-blue-600 transition-colors">← Voltar</button>
              </div>
+             <DiagnosticDashboard autoStart={true} />
            </div>
-        </div>
-      )}
+        )}
 
-      {activeCapture === 'signature' && (
-        <div className="fixed inset-0 z-[130] bg-slate-950/95 flex items-center justify-center p-6">
-           <div className="w-full max-w-lg">
-             <SignaturePad onSave={handleSign} />
-             <button onClick={() => setActiveCapture('terms')} className="mt-4 w-full text-white/40 text-[10px] font-black uppercase tracking-[0.2em]">Voltar aos Termos</button>
-           </div>
-        </div>
-      )}
-
-      {activeCapture === 'fleet' && (
-        <div className="fixed inset-x-0 bottom-0 z-[100] bg-white dark:bg-slate-900 rounded-t-[3.5rem] p-10 shadow-2xl border-t-4 border-blue-600 h-[70vh] overflow-y-auto animate-in slide-in-from-bottom-20 duration-500">
-           <div className="flex justify-between items-center mb-8">
-              <div>
-                <h3 className="text-3xl font-black tracking-tighter">Escolha o seu Carro</h3>
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Todos os veículos incluem seguro base</p>
+        {phase === AppPhase.DETAILS && (
+          <div className="max-w-xl mx-auto py-12 space-y-8 animate-in slide-in-from-bottom-12">
+            <h2 className="text-3xl font-black italic uppercase text-center tracking-tighter">Resumo da Reserva</h2>
+            <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border-2 border-slate-100 dark:border-slate-800 shadow-xl space-y-6">
+              <div className="flex justify-between border-b pb-4 dark:border-slate-800">
+                  <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Condutor</span>
+                  <span className="font-bold text-slate-900 dark:text-white">{reservation.mainDriver.name || '---'}</span>
               </div>
-              <button onClick={() => setActiveCapture(null)} className="w-10 h-10 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center font-black">✕</button>
-           </div>
-           <div className="grid gap-6">
-              {db.getFleet().map(car => (
-                <button 
-                  key={car.id} 
-                  onClick={() => { setReservation(prev => ({ ...prev, selectedCarId: car.id })); setActiveCapture(null); }} 
-                  className="group flex gap-8 bg-slate-50 dark:bg-slate-800/50 p-6 rounded-[2.5rem] text-left hover:border-blue-500 border-2 border-transparent transition-all shadow-sm hover:shadow-xl"
-                >
-                   <div className="w-32 h-32 shrink-0 overflow-hidden rounded-3xl">
-                      <img src={car.image} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" />
-                   </div>
-                   <div className="flex flex-col justify-center">
-                      <p className="font-black text-2xl tracking-tighter leading-none mb-1">{car.brand} {car.model}</p>
-                      <p className="text-blue-600 font-black text-lg mb-2">{car.price}</p>
-                      <p className="text-[10px] font-medium text-slate-400 uppercase tracking-widest">{car.specs}</p>
-                   </div>
-                </button>
-              ))}
-           </div>
-        </div>
-      )}
+              <div className="flex justify-between border-b pb-4 dark:border-slate-800">
+                  <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Levantamento</span>
+                  <span className="font-bold text-blue-600">{reservation.startDate} às {reservation.startTime}</span>
+              </div>
+              <div className="flex justify-between">
+                  <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Devolução</span>
+                  <span className="font-bold text-blue-600">{reservation.endDate} às {reservation.endTime}</span>
+              </div>
+            </div>
+            <button onClick={() => setPhase(AppPhase.CONTRACT_SIGNATURE)} className="w-full bg-slate-900 dark:bg-white dark:text-slate-900 text-white p-6 rounded-3xl font-black uppercase tracking-widest shadow-2xl hover:scale-[1.02] active:scale-95 transition-all">Confirmar e Assinar 🖋️</button>
+          </div>
+        )}
 
-      <ToastSystem notifications={notifications} onRemove={id => setNotifications(prev => prev.filter(n => n.id !== id))} />
+        {phase === AppPhase.CONTRACT_SIGNATURE && (
+            <div className="max-w-md mx-auto py-12 space-y-8 animate-in fade-in">
+                <h2 className="text-3xl font-black italic uppercase text-center">Finalização</h2>
+                <SignaturePad onSave={finalizeReservation} />
+                <button onClick={() => setPhase(AppPhase.DETAILS)} className="w-full text-slate-400 text-[10px] font-black uppercase tracking-widest">Voltar</button>
+            </div>
+        )}
+
+        {phase === AppPhase.COMPLETED && (
+           <div className="flex-1 flex flex-col items-center justify-center text-center p-8 animate-in zoom-in duration-700">
+             <div className="w-24 h-24 bg-green-500 rounded-full flex items-center justify-center text-4xl shadow-2xl animate-bounce">✅</div>
+             <h1 className="text-4xl font-black italic uppercase mt-8 tracking-tighter">Reserva Efetuada!</h1>
+             <p className="text-slate-500 dark:text-slate-400 font-bold max-w-xs mt-4">A sua reserva foi registada e sincronizada. Receberá um e-mail em breve.</p>
+             <button onClick={() => setPhase(AppPhase.WELCOME)} className="mt-12 bg-blue-600 text-white px-10 py-5 rounded-2xl font-black uppercase tracking-widest shadow-xl hover:scale-105 active:scale-95 transition-all">Nova Reserva</button>
+           </div>
+        )}
+
+        {phase === AppPhase.ADMIN_DASHBOARD && <AdminManagement onBack={() => setPhase(AppPhase.WELCOME)} lang={lang} />}
+      </main>
     </div>
   );
 }

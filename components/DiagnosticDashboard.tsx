@@ -8,7 +8,7 @@ interface DiagnosticDashboardProps {
 }
 
 export const DiagnosticDashboard: React.FC<DiagnosticDashboardProps> = ({ autoStart = false }) => {
-  const [report, setReport] = useState<HealthReport>(systemMonitor.getFullReport());
+  const [report, setReport] = useState<HealthReport>(() => systemMonitor.getInstantReport());
   const [isScanning, setIsScanning] = useState(false);
   const [scanStep, setScanStep] = useState('');
   const [progress, setProgress] = useState(0);
@@ -19,189 +19,144 @@ export const DiagnosticDashboard: React.FC<DiagnosticDashboardProps> = ({ autoSt
     setIsScanning(true);
     setProgress(5);
     setScanStep('Inicializando protocolos de segurança...');
-    await new Promise(r => setTimeout(r, 800));
+    await new Promise(r => setTimeout(r, 600));
     
     setProgress(25);
     setScanStep('Validando conectividade com Gemini AI...');
-    await new Promise(r => setTimeout(r, 1000));
+    const result = await systemMonitor.runFullDiagnostic();
     
-    setProgress(50);
-    setScanStep('Testando subsistema de áudio e buffers de PCM...');
-    await new Promise(r => setTimeout(r, 800));
+    setProgress(60);
+    setScanStep('Analisando integridade dos módulos locais...');
+    await new Promise(r => setTimeout(r, 400));
     
-    setProgress(75);
-    setScanStep('Verificando integridade do Local Storage e base de dados...');
-    await new Promise(r => setTimeout(r, 600));
-    
-    setProgress(90);
-    setScanStep('Finalizando relatório de estabilidade...');
-    
-    const newReport = await systemMonitor.runFullDiagnostic();
-    setReport(newReport);
+    setProgress(85);
+    setScanStep('Verificando quotas de armazenamento e memória...');
+    await new Promise(r => setTimeout(r, 400));
     
     setProgress(100);
-    setScanStep('Diagnóstico concluído com sucesso!');
-    
-    setTimeout(() => {
-      setIsScanning(false);
-      setProgress(0);
-    }, 1500);
+    setScanStep('Diagnóstico concluído com sucesso.');
+    setReport(result);
+    setIsScanning(false);
   }, [isScanning]);
 
   useEffect(() => {
-    if (autoStart) {
-      runFullDiagnostic();
-    }
-  }, []); // Run once on mount if autoStart is true
+    if (autoStart) runFullDiagnostic();
+  }, [autoStart, runFullDiagnostic]);
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setReport(systemMonitor.getFullReport());
-    }, 2000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'healthy': return 'text-green-500 bg-green-500/10';
-      case 'degraded': return 'text-amber-500 bg-amber-500/10';
-      case 'critical': return 'text-red-500 bg-red-500/10';
-      default: return 'text-slate-400';
-    }
+  const formatBytes = (bytes: number) => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
   return (
-    <div className="space-y-8 animate-in fade-in pb-20 max-w-7xl mx-auto">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6">
+    <div className="space-y-8 animate-in fade-in duration-500">
+      <div className="flex justify-between items-end">
         <div>
-          <div className="flex items-center gap-3 mb-2">
-            <h2 className="text-4xl font-black tracking-tighter">Diagnostic Core</h2>
-            <span className={`px-4 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${getStatusColor(report.status)}`}>
-              System {report.status}
-            </span>
-          </div>
-          <p className="text-slate-400 text-xs font-bold uppercase tracking-[0.2em]">Elite Auto-Healer Engine v2.5</p>
+          <h2 className="text-3xl font-black tracking-tighter italic uppercase">Health Monitor</h2>
+          <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em] mt-1">Status em Tempo Real do Ecossistema</p>
         </div>
-        
-        <div className="flex gap-3">
-          <button 
-            onClick={() => { if(confirm("Deseja forçar reparação total?")) systemMonitor.triggerAutoHeal('AI_CORE', 'Manual Trigger'); }}
-            className="px-6 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 transition-all"
-          >
-            Forçar Reparação
-          </button>
-          <button 
-            onClick={runFullDiagnostic}
-            disabled={isScanning}
-            className={`relative min-w-[240px] px-8 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all overflow-hidden ${isScanning ? 'bg-slate-200 text-slate-500 cursor-wait' : 'bg-blue-600 text-white shadow-xl shadow-blue-500/20 hover:scale-105 active:scale-95'}`}
-          >
-            <span className="relative z-10">{isScanning ? 'A Processar...' : 'Correr Suite Completa'}</span>
-            {isScanning && <div className="absolute inset-0 bg-blue-600/10 animate-pulse"></div>}
-          </button>
-        </div>
+        <button 
+          onClick={runFullDiagnostic} 
+          disabled={isScanning}
+          className={`px-6 py-3 bg-blue-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest shadow-xl transition-all ${isScanning ? 'opacity-50' : 'hover:scale-105 active:scale-95'}`}
+        >
+          {isScanning ? 'A Processar...' : 'Executar Scan'}
+        </button>
       </div>
 
-      {/* PROGRESS OVERLAY DURING SCAN */}
       {isScanning && (
-        <div className="bg-blue-600 text-white p-10 rounded-[3rem] shadow-2xl animate-in zoom-in duration-500 flex flex-col items-center gap-6">
-           <div className="text-center">
-              <h3 className="text-2xl font-black italic mb-2 tracking-tighter">Diagnosticando Ecossistema...</h3>
-              <p className="text-white/60 text-[10px] font-black uppercase tracking-[0.3em]">{scanStep}</p>
+        <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border dark:border-slate-800 space-y-4">
+           <div className="flex justify-between items-center mb-2">
+              <span className="text-[10px] font-black uppercase text-blue-500 tracking-widest animate-pulse">{scanStep}</span>
+              <span className="text-xs font-black">{progress}%</span>
            </div>
-           
-           <div className="w-full max-w-2xl bg-white/10 h-3 rounded-full overflow-hidden border border-white/10">
-              <div 
-                className="h-full bg-white shadow-[0_0_20px_rgba(255,255,255,0.5)] transition-all duration-500 ease-out" 
-                style={{ width: `${progress}%` }}
-              ></div>
-           </div>
-           
-           <div className="flex gap-8 text-[9px] font-black uppercase tracking-widest text-white/40">
-              <span className={progress >= 25 ? 'text-white' : ''}>Conectividade</span>
-              <span className={progress >= 50 ? 'text-white' : ''}>Áudio</span>
-              <span className={progress >= 75 ? 'text-white' : ''}>Database</span>
-              <span className={progress >= 90 ? 'text-white' : ''}>Stabilidade</span>
+           <div className="w-full h-3 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+              <div className="h-full bg-blue-600 transition-all duration-500" style={{ width: `${progress}%` }}></div>
            </div>
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Global Stability Card */}
-        <div className="lg:col-span-2 bg-white dark:bg-slate-900 p-10 rounded-[3.5rem] border dark:border-slate-800 shadow-sm relative overflow-hidden group">
-          <div className="absolute top-0 right-0 p-10 opacity-[0.02] text-9xl font-black select-none pointer-events-none group-hover:scale-110 transition-transform duration-1000">SAFE</div>
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6">Estabilidade Global do Ecossistema</p>
-          <div className="flex items-end gap-4 mb-8">
-             <div className="text-8xl font-black text-blue-600 tracking-tighter">{report.stabilityScore}%</div>
-             <div className="text-xs font-bold text-slate-400 uppercase mb-4 tracking-widest">Confidence Index</div>
-          </div>
-          <div className="w-full bg-slate-100 dark:bg-slate-800 h-4 rounded-full overflow-hidden mb-4">
-            <div className={`h-full transition-all duration-1000 ${report.stabilityScore > 80 ? 'bg-blue-600' : 'bg-amber-500'}`} style={{width: `${report.stabilityScore}%`}}></div>
-          </div>
-          <p className="text-[10px] text-slate-400 font-medium">Última análise realizada em {new Date(report.lastCheck).toLocaleString()}</p>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border dark:border-slate-800">
+           <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-4">Estabilidade Global</p>
+           <div className="flex items-center gap-4">
+              <div className={`text-5xl font-black tracking-tighter ${report.stabilityScore > 80 ? 'text-green-500' : 'text-amber-500'}`}>{report.stabilityScore}%</div>
+              <div className={`w-3 h-3 rounded-full ${report.status === 'healthy' ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
+           </div>
+        </div>
+        
+        <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border dark:border-slate-800">
+           <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-4">Memória Heap (JS)</p>
+           <div className="text-3xl font-black tracking-tight">{formatBytes(report.environment.memory || 0)}</div>
+           <p className="text-[9px] text-slate-400 mt-2 font-bold uppercase">Uso Ativo do Motor V8</p>
         </div>
 
-        {/* Quick Stats Grid */}
-        <div className="space-y-6">
-           {report.modules.map(m => (
-             <div key={m.name} className="bg-white dark:bg-slate-900 p-6 rounded-3xl border dark:border-slate-800 flex items-center justify-between">
-                <div>
-                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{m.name.replace('_', ' ')}</p>
-                  <p className="text-sm font-bold mt-1 truncate max-w-[180px]">{m.lastTestMessage || 'A aguardar teste...'}</p>
-                </div>
-                <div className={`w-3 h-3 rounded-full ${m.status === 'healthy' ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.5)]' : 'bg-amber-500 animate-pulse'}`}></div>
-             </div>
-           ))}
+        <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border dark:border-slate-800">
+           <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-4">Armazenamento Local</p>
+           <div className="flex justify-between items-end">
+              <span className="text-3xl font-black tracking-tight">{report.environment.storageUsage?.percentage}%</span>
+              <span className="text-[10px] text-slate-400 font-bold mb-1 uppercase tracking-tighter">{report.environment.storageUsage?.used}KB / 5MB</span>
+           </div>
+           <div className="w-full h-1 bg-slate-100 dark:bg-slate-800 rounded-full mt-3 overflow-hidden">
+              <div className="h-full bg-indigo-500" style={{ width: `${report.environment.storageUsage?.percentage}%` }}></div>
+           </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* Healing History */}
-        <div className="bg-slate-900 text-white p-10 rounded-[3rem] shadow-2xl border border-white/5">
-          <h3 className="text-xl font-black mb-8 italic tracking-tight">Auto-Correction Log</h3>
-          <div className="space-y-4">
-            {report.recentHeals.length === 0 ? (
-               <div className="py-12 text-center opacity-30">
-                  <p className="text-4xl mb-4">✨</p>
-                  <p className="text-[10px] font-black uppercase tracking-widest">Nenhuma re-calibração necessária</p>
-               </div>
-            ) : (
-              report.recentHeals.slice(0, 5).map(heal => (
-                <div key={heal.id} className="p-5 bg-white/5 rounded-2xl border border-white/5 flex items-start gap-4 animate-in slide-in-from-left-4">
-                   <div className="w-10 h-10 rounded-xl bg-blue-600/20 flex items-center justify-center text-blue-400 text-lg">⚡</div>
-                   <div className="flex-1">
-                      <div className="flex justify-between items-start mb-1">
-                        <p className="font-black text-[10px] uppercase tracking-widest text-blue-400">{heal.module}</p>
-                        <span className="text-[8px] opacity-40 font-mono">{new Date(heal.timestamp).toLocaleTimeString()}</span>
-                      </div>
-                      <p className="text-sm font-bold mb-1">{heal.action}</p>
-                      <p className="text-[10px] text-slate-400 font-medium">{heal.resultMessage}</p>
-                   </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* Realtime Telemetry Monitor */}
-        <div className="bg-white dark:bg-slate-900 p-10 rounded-[3rem] border dark:border-slate-800">
-           <div className="flex justify-between items-center mb-8">
-              <h3 className="text-xl font-black tracking-tight">Telemetry Stream</h3>
-              <div className="flex items-center gap-2">
-                 <div className="w-2 h-2 bg-blue-600 rounded-full animate-ping"></div>
-                 <span className="text-[9px] font-black uppercase text-blue-600">Live Buffer</span>
+      <div className="bg-white dark:bg-slate-900 rounded-[3rem] border dark:border-slate-800 p-10">
+         <h3 className="text-xl font-black italic uppercase mb-8 border-b dark:border-slate-800 pb-4">Módulos do Sistema</h3>
+         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
+            {report.modules.map(mod => (
+              <div key={mod.name} className="flex flex-col gap-2">
+                 <div className="flex justify-between items-center">
+                    <span className="text-[10px] font-black uppercase tracking-widest">{mod.name.replace('_', ' ')}</span>
+                    <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase ${mod.status === 'healthy' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>
+                      {mod.status}
+                    </span>
+                 </div>
+                 <div className="text-xs font-bold text-slate-400">Latência: {mod.latency}ms</div>
+                 <div className="text-[9px] opacity-60 italic">{mod.lastTestMessage || 'Módulo operacional'}</div>
               </div>
-           </div>
-           <div className="space-y-3 font-mono text-[10px] h-[300px] overflow-y-auto pr-4 no-scrollbar">
-              {systemMonitor.getLogs().map(log => (
-                <div key={log.id} className={`flex gap-4 p-2 rounded-lg ${log.level === 'error' ? 'bg-red-500/5 text-red-500' : 'text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>
-                   <span className="opacity-30">[{new Date(log.timestamp).toLocaleTimeString([], {hour12: false})}]</span>
-                   <span className="font-bold w-12 text-center uppercase">[{log.level}]</span>
-                   <span className="font-black text-slate-900 dark:text-slate-300">[{log.component}]</span>
-                   <span className="truncate">{log.message}</span>
-                </div>
-              ))}
-           </div>
-        </div>
+            ))}
+         </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+         <div className="bg-white dark:bg-slate-900 p-8 rounded-[3rem] border dark:border-slate-800">
+            <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-6">Logs Recentes</h3>
+            <div className="space-y-4 max-h-[300px] overflow-y-auto pr-4 no-scrollbar">
+               {systemMonitor.getLogs().map(log => (
+                 <div key={log.id} className="text-[10px] flex gap-3 items-start border-l-2 border-slate-100 dark:border-slate-800 pl-4 py-1">
+                    <span className="font-mono opacity-30 shrink-0">{new Date(log.timestamp).toLocaleTimeString()}</span>
+                    <span className={`font-black uppercase shrink-0 ${log.level === 'error' ? 'text-red-500' : 'text-blue-500'}`}>{log.level}</span>
+                    <span className="font-medium text-slate-600 dark:text-slate-300">{log.message}</span>
+                 </div>
+               ))}
+            </div>
+         </div>
+         
+         <div className="bg-white dark:bg-slate-900 p-8 rounded-[3rem] border dark:border-slate-800">
+            <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-6">Correções Automáticas</h3>
+            <div className="space-y-4">
+               {report.recentHeals.length === 0 ? (
+                 <p className="text-[10px] text-slate-400 italic">Nenhuma ação corretiva disparada.</p>
+               ) : (
+                 report.recentHeals.map(heal => (
+                   <div key={heal.id} className="p-4 bg-blue-50 dark:bg-blue-900/10 rounded-2xl border border-blue-100 dark:border-blue-800/20">
+                      <div className="flex justify-between items-center mb-1">
+                        <span className="text-[9px] font-black text-blue-600 uppercase">{heal.module}</span>
+                        <span className="text-[8px] font-mono opacity-40">{new Date(heal.timestamp).toLocaleTimeString()}</span>
+                      </div>
+                      <p className="text-xs font-bold">{heal.action}</p>
+                      <p className="text-[10px] text-slate-500 mt-1 italic">{heal.resultMessage}</p>
+                   </div>
+                 ))
+               )}
+            </div>
+         </div>
       </div>
     </div>
   );

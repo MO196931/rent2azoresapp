@@ -104,11 +104,11 @@ class GooglePlatformService {
     return { id: response.result.id, summary: response.result.summary, description: response.result.description };
   }
 
-  // ... (rest of existing listCalendars, isAvailable, createEvent, etc. stay the same)
   public async listCalendars(): Promise<GoogleCalendar[]> {
     if (!this.isAuthenticated) throw new Error("User not signed in");
     const response = await window.gapi.client.calendar.calendarList.list();
-    return response.result.items.map((item: any) => ({
+    const items = response.result.items || [];
+    return items.map((item: any) => ({
       id: item.id,
       summary: item.summary,
       primary: item.primary,

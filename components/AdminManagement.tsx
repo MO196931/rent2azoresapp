@@ -1,7 +1,6 @@
-
 import React, { useState, useEffect } from 'react';
 import { db } from '../services/mockDatabase';
-import { CarDetails, ReservationData, ServiceItem, MaintenanceRecord, AppPhase, CompanySettings } from '../types';
+import { CarDetails, ReservationData, ServiceItem, MaintenanceRecord, AppPhase, CompanySettings, DriverRole } from '../types';
 import { CloudHub } from './CloudHub';
 import { DiagnosticDashboard } from './DiagnosticDashboard';
 import CameraCapture from './CameraCapture';
@@ -13,47 +12,60 @@ interface AdminManagementProps {
   initialAutoScan?: boolean;
 }
 
-type AdminTab = 'overview' | 'reservations' | 'fleet' | 'services' | 'settings' | 'system';
+type AdminTab = 'overview' | 'reservations' | 'fleet' | 'roles' | 'services' | 'settings' | 'system';
 
 const StatCard = ({ label, value, icon, color }: { label: string; value: string | number; icon: string; color: string }) => (
-  <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border dark:border-slate-800 shadow-sm hover:shadow-md transition-shadow">
+  <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border-2 border-slate-300 dark:border-slate-800 shadow-sm hover:shadow-md transition-shadow">
     <div className="flex justify-between items-start mb-4">
-      <div className={`w-12 h-12 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-2xl`}>
+      <div className={`w-12 h-12 rounded-2xl bg-slate-200 dark:bg-slate-800 flex items-center justify-center text-2xl`}>
         {icon}
       </div>
-      <div className={`px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest bg-slate-100 dark:bg-slate-800 text-slate-400`}>
+      <div className={`px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest bg-slate-300 dark:bg-slate-700 text-slate-900 dark:text-slate-100`}>
         Live
       </div>
     </div>
-    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{label}</p>
+    <p className="text-[10px] font-black text-slate-950 dark:text-slate-100 uppercase tracking-widest mb-1">{label}</p>
     <p className={`text-4xl font-black tracking-tighter ${color}`}>{value}</p>
   </div>
 );
 
 const InputField = ({ label, value, onChange, type = 'text', placeholder = '' }: { label: string; value: string | number; onChange: (v: string) => void; type?: string; placeholder?: string }) => (
   <div className="space-y-1 w-full text-left">
-    <label className="text-[10px] font-black uppercase text-slate-400 ml-4 tracking-widest">{label}</label>
+    <label className="text-[10px] font-black uppercase text-slate-950 dark:text-slate-100 ml-4 tracking-widest">{label}</label>
     <input
       type={type}
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
-      className="w-full p-5 rounded-2xl bg-slate-50 dark:bg-slate-800 border-2 border-transparent focus:border-blue-600 transition-all font-bold outline-none text-slate-900 dark:text-white"
+      className="w-full p-5 rounded-2xl bg-white dark:bg-slate-800 border-2 border-slate-500 dark:border-slate-700 focus:border-blue-700 dark:focus:border-blue-500 transition-all font-bold outline-none text-slate-950 dark:text-white shadow-sm"
     />
   </div>
 );
 
 const TextAreaField = ({ label, value, onChange, placeholder = '' }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string }) => (
   <div className="space-y-1 w-full text-left">
-    <label className="text-[10px] font-black uppercase text-slate-400 ml-4 tracking-widest">{label}</label>
+    <label className="text-[10px] font-black uppercase text-slate-950 dark:text-slate-100 ml-4 tracking-widest">{label}</label>
     <textarea
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
       rows={3}
-      className="w-full p-5 rounded-2xl bg-slate-50 dark:bg-slate-800 border-2 border-transparent focus:border-blue-600 transition-all font-bold outline-none text-slate-900 dark:text-white resize-none"
+      className="w-full p-5 rounded-2xl bg-white dark:bg-slate-800 border-2 border-slate-500 dark:border-slate-700 focus:border-blue-700 dark:focus:border-blue-500 transition-all font-bold outline-none text-slate-950 dark:text-white resize-none shadow-sm"
     />
   </div>
+);
+
+const ToggleField = ({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) => (
+  <button 
+    type="button"
+    onClick={() => onChange(!checked)}
+    className="flex items-center justify-between w-full p-5 bg-white dark:bg-slate-800 rounded-2xl border-2 border-slate-400 dark:border-slate-700 hover:border-blue-700 transition-all shadow-sm"
+  >
+    <span className="text-xs font-black uppercase tracking-widest text-slate-950 dark:text-slate-100">{label}</span>
+    <div className={`w-12 h-6 rounded-full transition-colors relative ${checked ? 'bg-blue-700' : 'bg-slate-500 dark:bg-slate-600'}`}>
+       <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${checked ? 'translate-x-7' : 'translate-x-1'}`}></div>
+    </div>
+  </button>
 );
 
 export const AdminManagement: React.FC<AdminManagementProps> = ({ onBack, lang, initialAutoScan = false }) => {
@@ -61,52 +73,44 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({ onBack, lang, 
   const [fleet, setFleet] = useState<CarDetails[]>([]);
   const [reservations, setReservations] = useState<ReservationData[]>([]);
   const [services, setServices] = useState<ServiceItem[]>([]);
+  const [roles, setRoles] = useState<DriverRole[]>([]);
   const [company, setCompany] = useState<CompanySettings>(db.getCompany());
   
   const [editingCar, setEditingCar] = useState<Partial<CarDetails> | null>(null);
   const [editingService, setEditingService] = useState<Partial<ServiceItem> | null>(null);
+  const [editingRole, setEditingRole] = useState<Partial<DriverRole> | null>(null);
   const [maintenanceCar, setMaintenanceCar] = useState<CarDetails | null>(null);
   const [editingMaintenance, setEditingMaintenance] = useState<Partial<MaintenanceRecord> | null>(null);
   const [ocrLoading, setOcrLoading] = useState(false);
 
+  useEffect(() => {
+    loadData();
+  }, []);
+
   const loadData = () => {
-    setFleet(db.getFleet());
-    setReservations(db.getReservations());
-    setServices(db.getServices());
+    setFleet(db.getFleet() || []);
+    setReservations(db.getReservations() || []);
+    setServices(db.getServices() || []);
     setCompany(db.getCompany());
+    setRoles(db.getRoles() || []);
   };
 
   const handleOcr = async (base64: string) => {
     setOcrLoading(true);
     try {
       const cleanBase64 = base64.includes(',') ? base64.split(',')[1] : base64;
-      const result = await analyzeRegistrationCertificate(cleanBase64);
-      if (result) {
-        setEditingCar(prev => ({ ...prev, ...result }));
+      const data = await analyzeRegistrationCertificate(cleanBase64);
+      if (data) {
+        setEditingCar(prev => ({ ...prev, ...data }));
       }
-    } catch (error) {
-      console.error("OCR failed", error);
+    } catch (e) {
+      console.error("OCR Failed", e);
     } finally {
       setOcrLoading(false);
     }
   };
 
-  useEffect(() => {
-    loadData();
-  }, [initialAutoScan]);
-
-  const handleSaveCompany = (e: React.FormEvent) => {
-    e.preventDefault();
-    db.saveCompany(company);
-    alert("Configurações da empresa guardadas!");
-  };
-
-  const handleLogoUpload = (dataUrl: string) => {
-    setCompany(prev => ({ ...prev, logoUrl: dataUrl }));
-  };
-
-  const handleSaveCar = (e: React.FormEvent) => {
-    e.preventDefault();
+  const saveCar = () => {
     if (editingCar) {
       db.saveCar(editingCar as CarDetails);
       setEditingCar(null);
@@ -114,8 +118,7 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({ onBack, lang, 
     }
   };
 
-  const handleSaveService = (e: React.FormEvent) => {
-    e.preventDefault();
+  const saveService = () => {
     if (editingService) {
       db.saveService(editingService as ServiceItem);
       setEditingService(null);
@@ -123,428 +126,209 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({ onBack, lang, 
     }
   };
 
-  const handleSaveMaintenance = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (editingMaintenance && maintenanceCar) {
-      db.saveMaintenance({ ...editingMaintenance, carId: maintenanceCar.id } as MaintenanceRecord);
-      setEditingMaintenance(null);
+  const saveRole = () => {
+    if (editingRole) {
+      db.saveRole(editingRole as DriverRole);
+      setEditingRole(null);
       loadData();
     }
   };
 
-  const stats = {
-    totalRevenue: reservations.filter(r => r.status === 'confirmed' || r.status === 'completed').length * 150,
-    activeRentals: reservations.filter(r => r.status === 'confirmed').length,
-    fleetReady: fleet.filter(c => c.status === 'available').length,
-    pendingMaintenance: fleet.filter(c => c.status === 'maintenance').length
-  };
+  const tabs: {id: AdminTab, label: string, icon: string}[] = [
+    { id: 'overview', label: 'Painel', icon: '📊' },
+    { id: 'reservations', label: 'Reservas', icon: '📅' },
+    { id: 'fleet', label: 'Frota', icon: '🚗' },
+    { id: 'roles', label: 'Papéis', icon: '👤' },
+    { id: 'services', label: 'Serviços', icon: '🛡️' },
+    { id: 'settings', label: 'Definições', icon: '⚙️' },
+    { id: 'system', label: 'Saúde', icon: '🩺' }
+  ];
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 p-4 md:p-10 animate-in fade-in duration-500 overflow-y-auto no-scrollbar">
-      <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-12">
-        <div className="flex items-center gap-6">
-          {company.logoUrl && <img src={company.logoUrl} className="h-16 w-auto object-contain bg-white p-2 rounded-xl shadow-sm" />}
-          <div className="text-left">
-            <h1 className="text-4xl font-black tracking-tighter text-slate-900 dark:text-white">Admin Hub Elite</h1>
-            <p className="text-slate-400 font-bold uppercase text-[10px] tracking-[0.3em]">{company.name}</p>
-          </div>
-        </div>
-        <button onClick={onBack} className="bg-slate-900 text-white px-8 py-3 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-black active:scale-95 transition-all">
-          Exit Panel
-        </button>
-      </header>
-
-      <nav className="flex gap-2 p-1.5 bg-slate-200/50 dark:bg-slate-900/50 rounded-[2rem] w-fit mb-10 overflow-x-auto no-scrollbar">
-        {(['overview', 'reservations', 'fleet', 'services', 'settings', 'system'] as AdminTab[]).map(tab => (
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white flex flex-col font-sans overflow-x-hidden">
+      {/* SIDEBAR / MOBILE NAV */}
+      <nav className="fixed bottom-0 left-0 right-0 bg-white dark:bg-slate-900 border-t-2 border-slate-300 dark:border-slate-800 p-2 flex justify-around items-center z-[80] md:top-0 md:bottom-auto md:flex-col md:w-24 md:h-screen md:border-t-0 md:border-r-2">
+        <button onClick={onBack} className="hidden md:flex p-4 text-blue-800 mb-8 font-black text-2xl">AR</button>
+        {tabs.map(tab => (
           <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={`px-8 py-4 rounded-[1.5rem] font-black text-[10px] uppercase tracking-widest transition-all ${activeTab === tab ? 'bg-white dark:bg-slate-800 text-blue-600 shadow-xl' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`flex flex-col items-center gap-1 p-3 rounded-2xl transition-all ${activeTab === tab.id ? 'bg-blue-700 text-white shadow-lg' : 'text-slate-700 dark:text-slate-400 hover:bg-slate-300 dark:hover:bg-slate-800'}`}
           >
-            {tab}
+            <span className="text-xl">{tab.icon}</span>
+            <span className="text-[8px] font-black uppercase tracking-widest md:hidden">{tab.label}</span>
           </button>
         ))}
       </nav>
 
-      <main className="pb-20">
+      {/* MAIN CONTENT AREA */}
+      <div className="flex-1 md:ml-24 p-6 md:p-12 pb-24 md:pb-12">
+        <header className="flex justify-between items-center mb-12">
+           <h1 className="text-5xl font-black tracking-tighter italic uppercase text-slate-950 dark:text-white">{tabs.find(t => t.id === activeTab)?.label}</h1>
+           <div className="flex items-center gap-4">
+              <span className="px-4 py-2 bg-green-100 dark:bg-green-900/40 text-green-900 dark:text-green-400 rounded-full text-[10px] font-black uppercase tracking-widest border-2 border-green-300 dark:border-green-800">Sincronizado</span>
+              <img src={company.logoUrl} alt="Company Logo" className="w-10 h-10 rounded-xl object-contain bg-white p-1 shadow-sm border-2 border-slate-300" />
+           </div>
+        </header>
+
         {activeTab === 'overview' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 animate-in slide-in-from-bottom-4 duration-500">
-            <StatCard label="Estimated Revenue" value={`${stats.totalRevenue}€`} icon="💰" color="text-green-600" />
-            <StatCard label="Active Rentals" value={stats.activeRentals} icon="🚗" color="text-blue-600" />
-            <StatCard label="Available Fleet" value={stats.fleetReady} icon="✅" color="text-blue-500" />
-            <StatCard label="Maintenance Needed" value={stats.pendingMaintenance} icon="🔧" color="text-amber-500" />
-            
-            <div className="lg:col-span-4 grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
-                <div className="bg-white dark:bg-slate-900 p-8 rounded-[3rem] shadow-sm border dark:border-slate-800 text-left">
-                   <h3 className="font-black text-xs uppercase tracking-widest mb-6">Recent Fleet Activity</h3>
-                   <div className="space-y-4">
-                     {db.getMaintenance().slice(-4).reverse().map(m => (
-                         <div key={m.id} className="flex items-center gap-4 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl">
-                             <div className="w-10 h-10 bg-amber-100 dark:bg-amber-900/30 rounded-xl flex items-center justify-center text-xl">🔧</div>
-                             <div className="flex-1">
-                                <p className="font-bold text-sm">{m.type} - {fleet.find(c => c.id === m.carId)?.brand} {fleet.find(c => c.id === m.carId)?.model}</p>
-                                <p className="text-[10px] text-slate-400">{m.date} • {m.description}</p>
-                             </div>
-                             <span className="text-sm font-black text-amber-600">-{m.cost}€</span>
-                         </div>
-                     ))}
-                   </div>
-                </div>
-                <CloudHub t={(k) => k} />
-            </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 animate-in fade-in">
+             <StatCard label="Frota Total" value={fleet.length} icon="🚗" color="text-slate-950 dark:text-white" />
+             <StatCard label="Reservas Ativas" value={reservations.filter(r => r.status === 'confirmed').length} icon="📅" color="text-blue-800" />
+             <StatCard label="Disponibilidade" value={`${Math.round((fleet.filter(c => c.status === 'available').length / (fleet.length || 1)) * 100)}%`} icon="🔋" color="text-green-800 dark:text-green-400" />
+             <StatCard label="Faturação Mensal" value="12.450€" icon="💶" color="text-indigo-800 dark:text-indigo-400" />
           </div>
         )}
 
-        {activeTab === 'settings' && (
-          <div className="max-w-4xl animate-in slide-in-from-right-4">
-             <div className="mb-10 text-left">
-                <h3 className="text-2xl font-black tracking-tighter">Company Profile</h3>
-                <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest">Business Identity & Branding</p>
-             </div>
-             
-             <div className="grid grid-cols-1 md:grid-cols-3 gap-10">
-                <div className="space-y-6">
-                   <p className="text-[10px] font-black uppercase text-slate-400 ml-4 tracking-widest text-left">Company Logo</p>
-                   <div className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border dark:border-slate-800 aspect-square flex flex-col items-center justify-center gap-4 group relative overflow-hidden">
-                      {company.logoUrl ? (
-                         <img src={company.logoUrl} className="w-full h-auto object-contain max-h-40" />
-                      ) : (
-                         <span className="text-4xl grayscale">🏢</span>
-                      )}
-                      <div className="absolute inset-0 bg-slate-950/40 backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                         <CameraCapture label="Upload Logo" onCapture={handleLogoUpload} />
-                      </div>
-                   </div>
-                   <p className="text-[8px] text-slate-400 text-center italic">Este logo aparecerá na App e nos PDFs gerados pelo Agente.</p>
-                </div>
-
-                <form onSubmit={handleSaveCompany} className="md:col-span-2 space-y-6">
-                   <InputField label="Company Name" value={company.name} onChange={v => setCompany({...company, name: v})} />
-                   <InputField label="Tax ID / NIF" value={company.nif} onChange={v => setCompany({...company, nif: v})} />
-                   <InputField label="Official Email" value={company.email} onChange={v => setCompany({...company, email: v})} />
-                   <InputField label="Headquarters Address" value={company.address} onChange={v => setCompany({...company, address: v})} />
-                   
-                   <div className="pt-6">
-                      <button type="submit" className="w-full bg-blue-600 text-white py-6 rounded-3xl font-black uppercase text-xs tracking-widest shadow-xl shadow-blue-500/20 active:scale-95 transition-all">
-                         Update Identity
-                      </button>
-                   </div>
-                </form>
-             </div>
+        {activeTab === 'reservations' && (
+          <div className="bg-white dark:bg-slate-900 rounded-[3rem] p-8 border-2 border-slate-300 dark:border-slate-800 overflow-x-auto animate-in slide-in-from-bottom-6 shadow-sm">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="border-b-2 border-slate-300 dark:border-slate-800">
+                  <th className="p-4 text-[10px] font-black uppercase tracking-widest text-slate-950 dark:text-slate-200">Cliente</th>
+                  <th className="p-4 text-[10px] font-black uppercase tracking-widest text-slate-950 dark:text-slate-200">Datas & Horas</th>
+                  <th className="p-4 text-[10px] font-black uppercase tracking-widest text-slate-950 dark:text-slate-200">Viatura</th>
+                  <th className="p-4 text-[10px] font-black uppercase tracking-widest text-slate-950 dark:text-slate-200">Estado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(reservations || []).map(res => (
+                  <tr key={res.id} className="border-b border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+                    <td className="p-4">
+                      <p className="font-bold text-slate-950 dark:text-slate-100">{res.mainDriver.name}</p>
+                      <p className="text-[10px] text-slate-900 dark:text-slate-300 font-bold uppercase">{res.mainDriver.email}</p>
+                    </td>
+                    <td className="p-4">
+                      <p className="text-xs font-bold text-slate-950 dark:text-slate-200">{res.startDate} {res.startTime} → {res.endDate} {res.endTime}</p>
+                      <p className="text-[10px] text-slate-700 dark:text-slate-400 font-black uppercase tracking-tighter">Reserva Efetuada</p>
+                    </td>
+                    <td className="p-4">
+                       <span className="bg-slate-200 dark:bg-slate-800 px-3 py-1 rounded-full text-[10px] font-black font-mono tracking-tight text-slate-950 dark:text-slate-100 border-2 border-slate-400 dark:border-slate-700">{res.selectedCarId}</span>
+                    </td>
+                    <td className="p-4">
+                       <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${res.status === 'confirmed' ? 'bg-green-100 text-green-900 border-2 border-green-400' : 'bg-slate-200 text-slate-800 border-2 border-slate-400'}`}>
+                         {res.status}
+                       </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
 
         {activeTab === 'fleet' && (
-          <div className="space-y-10 animate-in slide-in-from-right-4 duration-500">
-            <div className="flex justify-between items-end">
-               <div className="text-left">
-                  <h3 className="text-2xl font-black tracking-tighter">Fleet Inventory</h3>
-                  <p className="text-slate-400 text-[10px] font-bold uppercase">Manage vehicles and run OCR diagnostics</p>
-               </div>
-               <button onClick={() => setEditingCar({ status: 'available', currentOdometer: 0, fuelLevel: '100%' })} className="bg-blue-600 text-white px-8 py-4 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-blue-700 shadow-lg shadow-blue-500/20 active:scale-95 transition-all">
-                  + Add Vehicle (OCR)
+          <div className="space-y-8 animate-in fade-in">
+            <div className="flex justify-between items-center">
+               <p className="text-slate-950 dark:text-slate-200 text-xs font-black uppercase tracking-[0.2em]">{fleet.length} Viaturas Ativas</p>
+               <button 
+                onClick={() => setEditingCar({ status: 'available', currentOdometer: 0, fuelLevel: '100%' })}
+                className="bg-blue-700 text-white px-8 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl hover:bg-blue-800 transition-all"
+               >
+                 Adicionar Viatura
                </button>
             </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+               {(fleet || []).map(car => (
+                 <div key={car.id} className="bg-white dark:bg-slate-900 rounded-[3rem] border-2 border-slate-300 dark:border-slate-800 p-8 flex gap-8 group hover:border-blue-700 transition-all shadow-sm">
+                    <img src={car.image} className="w-32 h-32 rounded-[2rem] object-cover shadow-2xl border-2 border-slate-200 dark:border-slate-800" alt={car.model} />
+                    <div className="flex-1">
+                       <div className="flex justify-between items-start mb-2">
+                          <h3 className="text-2xl font-black tracking-tighter leading-tight text-slate-950 dark:text-white">{car.brand} {car.model}</h3>
+                          <span className="font-mono text-[10px] font-black bg-slate-200 dark:bg-slate-800 text-slate-950 dark:text-slate-100 px-2 py-1 rounded-md border-2 border-slate-400 dark:border-slate-700">{car.licensePlate}</span>
+                       </div>
+                       <div className="flex gap-2 mb-6">
+                          <span className={`px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest ${car.status === 'available' ? 'bg-green-100 text-green-900 border-2 border-green-400' : 'bg-red-100 text-red-900 border-2 border-red-400'}`}>
+                            {car.status}
+                          </span>
+                       </div>
+                       <div className="flex gap-4">
+                          <button onClick={() => setEditingCar(car)} className="flex-1 py-3 bg-slate-200 dark:bg-slate-800 text-slate-950 dark:text-slate-100 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 hover:text-white transition-all border-2 border-slate-400 dark:border-slate-700">Editar</button>
+                       </div>
+                    </div>
+                 </div>
+               ))}
+            </div>
+          </div>
+        )}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-              {fleet.map(car => (
-                <div key={car.id} className="bg-white dark:bg-slate-900 rounded-[3rem] shadow-sm border dark:border-slate-800 overflow-hidden group hover:border-blue-500 transition-all flex flex-col">
-                  <div className="relative h-56 overflow-hidden">
-                     <img src={car.image || 'https://images.unsplash.com/photo-1549317661-bd32c8ce0db2?auto=format&fit=crop&q=80&w=600'} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-1000" alt={car.model} />
-                     <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent"></div>
-                     <div className="absolute bottom-6 left-6 text-white text-left">
-                        <p className="font-black text-2xl tracking-tighter leading-none">{car.brand} {car.model}</p>
-                        <p className="text-[10px] font-black uppercase tracking-[0.2em] opacity-80 mt-1">{car.licensePlate}</p>
-                     </div>
-                     <div className={`absolute top-6 right-6 px-4 py-1 rounded-full text-[9px] font-black uppercase shadow-xl ${car.status === 'available' ? 'bg-green-500 text-white' : car.status === 'maintenance' ? 'bg-amber-500 text-white' : 'bg-blue-500 text-white'}`}>
-                       {car.status}
-                     </div>
-                  </div>
-                  <div className="p-8 flex-1 flex flex-col justify-between space-y-6 text-left">
-                    <div className="grid grid-cols-2 gap-4 text-[10px] font-black uppercase tracking-widest text-slate-400">
-                       <div className="space-y-1">
-                           <p>Odometer</p>
-                           <p className="text-slate-900 dark:text-white text-sm">{car.currentOdometer} KM</p>
-                       </div>
-                       <div className="space-y-1">
-                           <p>Fuel Level</p>
-                           <p className="text-slate-900 dark:text-white text-sm">{car.fuelLevel}</p>
-                       </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                       <button onClick={() => setEditingCar(car)} className="py-3 bg-slate-100 dark:bg-slate-800 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-blue-600 hover:text-white transition-all">Edit Info</button>
-                       <button onClick={() => setMaintenanceCar(car)} className="py-3 bg-amber-100 text-amber-600 dark:bg-amber-900/30 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-amber-600 hover:text-white transition-all">Logs</button>
-                       <button onClick={() => { if(confirm("Delete this vehicle?")) { db.deleteCar(car.id); loadData(); } }} className="col-span-2 py-3 text-red-500 font-black text-[10px] uppercase tracking-widest hover:bg-red-50 dark:hover:bg-red-900/10 transition-colors rounded-xl border border-red-100 dark:border-red-900/20">Remove from Fleet</button>
-                    </div>
-                  </div>
+        {activeTab === 'roles' && (
+           <div className="space-y-6 animate-in fade-in">
+              <p className="text-slate-950 dark:text-slate-200 text-xs font-black uppercase tracking-[0.2em]">Configuração de Perfis</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                 {(roles || []).map(role => (
+                   <div key={role.id} className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border-2 border-slate-300 dark:border-slate-800 flex flex-col shadow-sm">
+                      <h4 className="text-xl font-black mb-2 text-slate-950 dark:text-white">{role.label}</h4>
+                      <p className="text-xs text-slate-900 dark:text-slate-200 font-bold mb-6 flex-1 leading-relaxed">{role.description}</p>
+                      <div className="flex gap-2 pt-6 border-t-2 border-slate-200 dark:border-slate-800">
+                         <button onClick={() => setEditingRole(role)} className="flex-1 text-[9px] font-black uppercase py-2 bg-slate-200 dark:bg-slate-800 text-slate-950 dark:text-slate-100 rounded-lg hover:bg-slate-300 transition-colors border-2 border-slate-400 dark:border-slate-700">Editar</button>
+                      </div>
+                   </div>
+                 ))}
+              </div>
+           </div>
+        )}
+
+        {activeTab === 'services' && (
+          <div className="space-y-6 animate-in fade-in">
+            <h3 className="text-xl font-black tracking-tight italic text-slate-950 dark:text-white">Serviços & Proteções</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {(services || []).map(service => (
+                <div key={service.id} className="bg-white dark:bg-slate-900 p-8 rounded-[2.5rem] border-2 border-slate-300 dark:border-slate-800 relative group shadow-sm">
+                  <h4 className="font-black text-lg mb-1 text-slate-950 dark:text-white">{service.name}</h4>
+                  <p className="text-[10px] text-blue-800 dark:text-blue-400 font-black uppercase mb-4">{service.price}€ / {service.priceModel === 'daily' ? 'DIA' : 'FIXO'}</p>
+                  <p className="text-xs text-slate-900 dark:text-slate-200 font-bold mb-6">{service.description}</p>
+                  <button onClick={() => setEditingService(service)} className="w-full py-3 bg-slate-200 dark:bg-slate-800 text-slate-950 dark:text-slate-100 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 hover:text-white transition-all border-2 border-slate-400 dark:border-slate-700">Configurar</button>
                 </div>
               ))}
             </div>
           </div>
         )}
 
-        {activeTab === 'services' && (
-          <div className="space-y-12 animate-in slide-in-from-right-4 duration-500">
-            <div className="flex justify-between items-end">
-               <div className="text-left">
-                  <h3 className="text-2xl font-black tracking-tighter">Services & Insurance</h3>
-                  <p className="text-slate-400 text-[10px] font-bold uppercase">Pricing models and product catalog</p>
-               </div>
-               <button onClick={() => setEditingService({ type: 'extra', priceModel: 'daily', price: 0, name: '', description: '' })} className="bg-blue-600 text-white px-8 py-4 rounded-2xl font-black text-xs uppercase tracking-widest active:scale-95 transition-all shadow-xl shadow-blue-500/20">
-                  + Add New Item
-               </button>
-            </div>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                <div className="bg-white dark:bg-slate-900 rounded-[3rem] border dark:border-slate-800 overflow-hidden shadow-sm">
-                  <div className="p-8 border-b dark:border-slate-800 flex justify-between items-center bg-blue-50/50 dark:bg-blue-900/10">
-                    <h3 className="font-black text-xs uppercase tracking-widest text-blue-600">Insurance Policies</h3>
-                  </div>
-                  <table className="w-full text-left">
-                    <thead className="bg-slate-50 dark:bg-slate-800/50 border-b dark:border-slate-800">
-                      <tr className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                        <th className="px-8 py-4">Coverage</th>
-                        <th className="px-8 py-4">Price</th>
-                        <th className="px-8 py-4 text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y dark:divide-slate-800 text-left">
-                      {services.filter(s => s.type === 'insurance').map(srv => (
-                        <tr key={srv.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
-                          <td className="px-8 py-6">
-                            <p className="font-bold text-sm text-slate-900 dark:text-white">{srv.name}</p>
-                            <p className="text-[10px] text-slate-400 max-w-xs">{srv.description}</p>
-                          </td>
-                          <td className="px-8 py-6">
-                            <p className="font-black text-blue-600">{srv.price}€</p>
-                            <p className="text-[9px] font-black uppercase text-slate-400">{srv.priceModel}</p>
-                          </td>
-                          <td className="px-8 py-6 text-right">
-                            <div className="flex gap-2 justify-end">
-                               <button onClick={() => setEditingService(srv)} className="p-2 bg-slate-100 dark:bg-slate-800 rounded-lg hover:bg-blue-600 hover:text-white transition-all text-xs">✎</button>
-                               <button onClick={() => { if(confirm("Delete this insurance?")) { db.deleteService(srv.id); loadData(); } }} className="p-2 bg-red-100 text-red-600 rounded-lg hover:bg-red-600 hover:text-white transition-all text-xs">✕</button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <div className="bg-white dark:bg-slate-900 rounded-[3rem] border dark:border-slate-800 overflow-hidden shadow-sm">
-                  <div className="p-8 border-b dark:border-slate-800 flex justify-between items-center bg-green-50/50 dark:bg-green-900/10">
-                    <h3 className="font-black text-xs uppercase tracking-widest text-green-600">Extras & Fees</h3>
-                  </div>
-                  <table className="w-full text-left">
-                    <thead className="bg-slate-50 dark:bg-slate-800/50 border-b dark:border-slate-800">
-                      <tr className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                        <th className="px-8 py-4">Service</th>
-                        <th className="px-8 py-4">Price</th>
-                        <th className="px-8 py-4 text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y dark:divide-slate-800 text-left">
-                      {services.filter(s => s.type !== 'insurance').map(srv => (
-                        <tr key={srv.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
-                          <td className="px-8 py-6">
-                            <p className="font-bold text-sm text-slate-900 dark:text-white">{srv.name}</p>
-                            <p className="text-[10px] text-slate-400">{srv.description}</p>
-                          </td>
-                          <td className="px-8 py-6">
-                            <p className="font-black text-green-600">{srv.price}€</p>
-                            <p className="text-[9px] font-black uppercase text-slate-400">{srv.priceModel}</p>
-                          </td>
-                          <td className="px-8 py-6 text-right">
-                            <div className="flex gap-2 justify-end">
-                               <button onClick={() => setEditingService(srv)} className="p-2 bg-slate-100 dark:bg-slate-800 rounded-lg hover:bg-blue-600 hover:text-white transition-all text-xs">✎</button>
-                               <button onClick={() => { if(confirm("Delete this service?")) { db.deleteService(srv.id); loadData(); } }} className="p-2 bg-red-100 text-red-600 rounded-lg hover:bg-red-600 hover:text-white transition-all text-xs">✕</button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-            </div>
-          </div>
-        )}
-
-        {activeTab === 'reservations' && (
-          <div className="bg-white dark:bg-slate-900 rounded-[3rem] shadow-sm border dark:border-slate-800 overflow-hidden animate-in slide-in-from-right-4 duration-500">
-            <div className="p-8 border-b dark:border-slate-800 flex justify-between items-center">
-               <h3 className="font-black text-xs uppercase tracking-widest">Reservation Pipeline</h3>
-               <span className="bg-blue-100 text-blue-600 dark:bg-blue-900/30 px-4 py-1.5 rounded-full text-[10px] font-black uppercase">{reservations.length} Active</span>
-            </div>
-            <div className="overflow-x-auto no-scrollbar">
-              <table className="w-full text-left">
-                <thead className="bg-slate-50 dark:bg-slate-800/50">
-                  <tr className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                    <th className="px-8 py-4">Client / ID</th>
-                    <th className="px-8 py-4">Car Details</th>
-                    <th className="px-8 py-4">Dates</th>
-                    <th className="px-8 py-4">Status</th>
-                    <th className="px-8 py-4 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y dark:divide-slate-800 text-left">
-                  {reservations.map(r => (
-                    <tr key={r.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
-                      <td className="px-8 py-6">
-                        <p className="font-bold text-sm text-slate-900 dark:text-white">{r.mainDriver.name}</p>
-                        <p className="text-[10px] text-slate-400 font-mono">{r.id}</p>
-                      </td>
-                      <td className="px-8 py-6">
-                        <p className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                            {fleet.find(c => c.id === r.selectedCarId)?.brand} {fleet.find(c => c.id === r.selectedCarId)?.model || 'Pending Selection'}
-                        </p>
-                      </td>
-                      <td className="px-8 py-6">
-                        <p className="text-[10px] font-black uppercase text-slate-500">{r.startDate} to {r.endDate}</p>
-                      </td>
-                      <td className="px-8 py-6">
-                         <span className={`px-4 py-1 rounded-full text-[9px] font-black uppercase ${r.status === 'confirmed' ? 'bg-green-100 text-green-600 dark:bg-green-900/30' : 'bg-slate-100 text-slate-500 dark:bg-slate-800'}`}>
-                            {r.status}
-                         </span>
-                      </td>
-                      <td className="px-8 py-6 text-right">
-                         <div className="flex gap-2 justify-end">
-                            <button onClick={() => { db.updateReservationStatus(r.id!, 'confirmed'); loadData(); }} className="p-2 bg-green-100 text-green-600 rounded-lg hover:bg-green-600 hover:text-white transition-all text-xs">✓</button>
-                            <button onClick={() => { db.updateReservationStatus(r.id!, 'cancelled'); loadData(); }} className="p-2 bg-red-100 text-red-600 rounded-lg hover:bg-red-600 hover:text-white transition-all text-xs">✕</button>
-                         </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+        {activeTab === 'settings' && (
+          <div className="max-w-2xl bg-white dark:bg-slate-900 p-12 rounded-[3.5rem] border-2 border-slate-400 dark:border-slate-800 animate-in zoom-in-95 shadow-sm">
+             <div className="space-y-6">
+                <InputField label="Nome Comercial" value={company.name} onChange={v => setCompany({...company, name: v})} />
+                <InputField label="Email Corporativo" value={company.email} onChange={v => setCompany({...company, email: v})} />
+                <InputField label="Endereço Sede" value={company.address} onChange={v => setCompany({...company, address: v})} />
+                <InputField label="NIF / VAT" value={company.nif} onChange={v => setCompany({...company, nif: v})} />
+                <button 
+                  onClick={() => { db.saveCompany(company); alert("Configurações atualizadas!"); }}
+                  className="w-full py-6 bg-blue-700 text-white rounded-[2rem] font-black text-[10px] uppercase tracking-[0.3em] mt-8 hover:bg-blue-800 transition-all shadow-xl"
+                >
+                  Confirmar Alterações
+                </button>
+             </div>
           </div>
         )}
 
         {activeTab === 'system' && <DiagnosticDashboard autoStart={initialAutoScan} />}
-      </main>
+      </div>
 
-      {/* MODAL - EDIT SERVICE / INSURANCE */}
-      {editingService && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[110] flex items-center justify-center p-4 md:p-6 overflow-y-auto">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-2xl rounded-[3rem] p-8 md:p-12 shadow-2xl animate-in zoom-in duration-300 relative">
-            <button onClick={() => setEditingService(null)} className="absolute top-8 right-8 text-2xl opacity-50 hover:opacity-100 transition-opacity">✕</button>
-            <div className="mb-10 text-left">
-               <h4 className="text-4xl font-black tracking-tighter">Product Catalog</h4>
-               <p className="text-slate-400 font-black uppercase text-[10px] tracking-[0.3em]">Configure Insurance or Extra Service</p>
-            </div>
-            
-            <form onSubmit={handleSaveService} className="space-y-6">
-               <div className="grid grid-cols-2 gap-6">
-                  <div className="space-y-1 text-left">
-                      <label className="text-[10px] font-black uppercase text-slate-400 ml-4 tracking-widest">Type</label>
-                      <select 
-                        className="w-full p-5 rounded-2xl bg-slate-50 dark:bg-slate-800 border-2 border-transparent focus:border-blue-600 transition-all font-bold outline-none appearance-none" 
-                        value={editingService.type} 
-                        onChange={(e) => setEditingService({...editingService, type: e.target.value as any})}
-                      >
-                          <option value="insurance">Insurance Policy</option>
-                          <option value="extra">Extra Equipment / Add-on</option>
-                          <option value="fee">Administrative Fee</option>
-                      </select>
-                  </div>
-                  <InputField label="Price (€)" value={editingService.price || 0} type="number" onChange={(v: string) => setEditingService({...editingService, price: Number(v)})} />
-               </div>
-
-               <InputField label="Item Name" value={editingService.name || ''} placeholder="Ex: Full Insurance, Baby Seat..." onChange={(v: string) => setEditingService({...editingService, name: v})} />
-               
-               <TextAreaField label="Description" value={editingService.description || ''} placeholder="Breve resumo visível para o cliente..." onChange={(v: string) => setEditingService({...editingService, description: v})} />
-
-               <div className="grid grid-cols-2 gap-6">
-                  <div className="space-y-1 text-left">
-                      <label className="text-[10px] font-black uppercase text-slate-400 ml-4 tracking-widest">Price Model</label>
-                      <select 
-                        className="w-full p-5 rounded-2xl bg-slate-50 dark:bg-slate-800 border-2 border-transparent focus:border-blue-600 transition-all font-bold outline-none appearance-none" 
-                        value={editingService.priceModel} 
-                        onChange={(e) => setEditingService({...editingService, priceModel: e.target.value as any})}
-                      >
-                          <option value="daily">Daily Rate (Per day)</option>
-                          <option value="fixed">Fixed Price (One-time)</option>
-                      </select>
-                  </div>
-                  {editingService.type === 'insurance' && (
-                     <InputField label="Deductible / Franquia (€)" value={0} type="number" onChange={() => {}} />
-                  )}
-               </div>
-
-               {editingService.type === 'insurance' && (
-                  <TextAreaField 
-                    label="Coverage Details (Internal)" 
-                    value={editingService.coverageDetails || ''} 
-                    placeholder="Detalhes legais da apólice..." 
-                    onChange={(v: string) => setEditingService({...editingService, coverageDetails: v})} 
-                  />
-               )}
-
-               <div className="flex gap-4 pt-10">
-                  <button type="submit" className="flex-1 bg-blue-600 text-white py-6 rounded-3xl font-black uppercase text-xs tracking-widest shadow-2xl shadow-blue-500/40 hover:bg-blue-700 active:scale-95 transition-all">
-                     Save Product
-                  </button>
-                  <button type="button" onClick={() => setEditingService(null)} className="flex-1 bg-slate-100 dark:bg-slate-800 py-6 rounded-3xl font-black uppercase text-xs tracking-widest hover:bg-slate-200 transition-all">
-                     Cancel
-                  </button>
-               </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL - FLEET (Existing) */}
+      {/* MODAL: EDIT CAR */}
       {editingCar && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[110] flex items-center justify-center p-4 md:p-6 overflow-y-auto">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-5xl rounded-[3rem] p-8 md:p-12 shadow-2xl animate-in zoom-in duration-300 relative">
-            <button onClick={() => setEditingCar(null)} className="absolute top-8 right-8 text-2xl opacity-50 hover:opacity-100 transition-opacity">✕</button>
-            <div className="mb-10 text-left">
-               <h4 className="text-4xl font-black tracking-tighter">Fleet Asset Manager</h4>
-               <p className="text-slate-400 font-black uppercase text-[10px] tracking-[0.3em]">Vehicle Registration & Identity Diagnostic</p>
-            </div>
-            <div className="grid grid-cols-1 lg:grid-cols-5 gap-12">
-               <div className="lg:col-span-2 space-y-8">
-                  <div className="p-8 bg-blue-50/50 dark:bg-blue-900/10 rounded-[2.5rem] border border-dashed border-blue-200 dark:border-blue-800 text-center">
-                     <p className="text-xs font-black uppercase tracking-widest text-blue-600 mb-6 flex items-center justify-center gap-2">
-                         <span className="text-lg">🤖</span> AI Smart Scan
-                     </p>
-                     <div className="space-y-4">
-                        <CameraCapture label="Registration Certificate (Front)" onCapture={(img) => handleOcr(img)} />
-                        {ocrLoading && (
-                            <div className="flex flex-col items-center gap-3 p-6 bg-blue-600 text-white rounded-2xl animate-pulse">
-                                <span className="text-2xl animate-spin">⚙️</span>
-                                <span className="text-[10px] font-black uppercase tracking-widest">Gemini Analyzing Document...</span>
-                            </div>
-                        )}
-                     </div>
-                  </div>
-                  <InputField label="Visual Identity (Image URL)" value={editingCar.image || ''} onChange={(v: string) => setEditingCar({...editingCar, image: v})} />
+        <div className="fixed inset-0 z-[150] bg-slate-950/95 backdrop-blur-xl flex items-center justify-center p-6">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-4xl rounded-[4rem] p-12 shadow-2xl relative max-h-[90vh] overflow-y-auto no-scrollbar border-2 border-slate-400 dark:border-slate-800">
+             <div className="flex justify-between items-center mb-12">
+               <h3 className="text-4xl font-black italic tracking-tighter uppercase text-slate-950 dark:text-white">{editingCar.id ? 'Ficha Técnica' : 'Nova Viatura'}</h3>
+               <button onClick={() => setEditingCar(null)} className="p-4 bg-slate-300 dark:bg-slate-800 rounded-full text-xs text-slate-950 dark:text-white hover:bg-slate-400">✕</button>
+             </div>
+             
+             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+               <div className="space-y-6">
+                  <CameraCapture label="Scan Livrete (OCR)" onCapture={(base64) => handleOcr(base64)} />
+                  <InputField label="Marca" value={editingCar.brand || ''} onChange={v => setEditingCar({...editingCar, brand: v})} />
+                  <InputField label="Modelo" value={editingCar.model || ''} onChange={v => setEditingCar({...editingCar, model: v})} />
+                  <InputField label="Matrícula" value={editingCar.licensePlate || ''} onChange={v => setEditingCar({...editingCar, licensePlate: v})} />
                </div>
-               <form onSubmit={handleSaveCar} className="lg:col-span-3 space-y-6">
-                  <div className="grid grid-cols-2 gap-6">
-                     <InputField label="Brand" value={editingCar.brand || ''} onChange={(v: string) => setEditingCar({...editingCar, brand: v})} />
-                     <InputField label="Model" value={editingCar.model || ''} onChange={(v: string) => setEditingCar({...editingCar, model: v})} />
+               <div className="space-y-6">
+                  <InputField label="VIN (Chassi)" value={editingCar.vin || ''} onChange={v => setEditingCar({...editingCar, vin: v})} />
+                  <InputField label="Preço / Dia" value={editingCar.price || ''} onChange={v => setEditingCar({...editingCar, price: v})} />
+                  <div className="pt-6">
+                    <button onClick={saveCar} className="w-full py-6 bg-blue-700 text-white rounded-[2rem] font-black text-[10px] uppercase tracking-widest shadow-xl hover:bg-blue-800">Guardar Viatura</button>
                   </div>
-                  <div className="grid grid-cols-2 gap-6">
-                     <InputField label="License Plate" value={editingCar.licensePlate || ''} onChange={(v: string) => setEditingCar({...editingCar, licensePlate: v})} />
-                     <InputField label="VIN" value={editingCar.vin || ''} onChange={(v: string) => setEditingCar({...editingCar, vin: v})} />
-                  </div>
-                  <div className="grid grid-cols-2 gap-6 pt-6">
-                      <div className="space-y-1 text-left">
-                          <label className="text-[10px] font-black uppercase text-slate-400 ml-4">Deployment Status</label>
-                          <select className="w-full p-5 rounded-2xl bg-slate-50 dark:bg-slate-800 border-2 border-transparent focus:border-blue-600 transition-all font-bold outline-none appearance-none" value={editingCar.status} onChange={(e) => setEditingCar({...editingCar, status: e.target.value as any})}>
-                              <option value="available">Active / Available</option>
-                              <option value="rented">In Service / Rented</option>
-                              <option value="maintenance">Under Repair / Maintenance</option>
-                              <option value="cleaning">Cleaning Protocol</option>
-                          </select>
-                      </div>
-                      <InputField label="Current Mileage (KM)" value={String(editingCar.currentOdometer || 0)} onChange={(v: string) => setEditingCar({...editingCar, currentOdometer: Number(v)})} type="number" />
-                  </div>
-                  <div className="flex gap-4 pt-10">
-                     <button type="submit" className="flex-1 bg-blue-600 text-white py-6 rounded-3xl font-black uppercase text-xs tracking-widest shadow-2xl shadow-blue-500/40 hover:bg-blue-700 active:scale-95 transition-all">Synchronize Asset</button>
-                     <button type="button" onClick={() => setEditingCar(null)} className="flex-1 bg-slate-100 dark:bg-slate-800 py-6 rounded-3xl font-black uppercase text-xs tracking-widest hover:bg-slate-200 transition-all">Cancel</button>
-                  </div>
-               </form>
-            </div>
+               </div>
+             </div>
           </div>
         </div>
       )}

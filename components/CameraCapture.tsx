@@ -21,7 +21,7 @@ const CameraCapture: React.FC<CameraCaptureProps> = ({ onCapture, label, mode = 
   const startCamera = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ 
-          video: { facingMode: 'environment' },
+          video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
           audio: mode === 'video' 
       });
       if (videoRef.current) {
@@ -44,6 +44,37 @@ const CameraCapture: React.FC<CameraCaptureProps> = ({ onCapture, label, mode = 
     }
   };
 
+  const processImage = (canvas: HTMLCanvasElement): string => {
+    // Optimization: Resize image to a maximum dimension while maintaining aspect ratio
+    const MAX_WIDTH = 1024;
+    const MAX_HEIGHT = 1024;
+    let width = canvas.width;
+    let height = canvas.height;
+
+    if (width > height) {
+      if (width > MAX_WIDTH) {
+        height *= MAX_WIDTH / width;
+        width = MAX_WIDTH;
+      }
+    } else {
+      if (height > MAX_HEIGHT) {
+        width *= MAX_HEIGHT / height;
+        height = MAX_HEIGHT;
+      }
+    }
+
+    const outputCanvas = document.createElement('canvas');
+    outputCanvas.width = width;
+    outputCanvas.height = height;
+    const ctx = outputCanvas.getContext('2d');
+    if (ctx) {
+      ctx.drawImage(canvas, 0, 0, width, height);
+      // JPEG quality 0.7 provides great balance between size and detail for OCR/Vistoria
+      return outputCanvas.toDataURL('image/jpeg', 0.7);
+    }
+    return canvas.toDataURL('image/jpeg', 0.8);
+  };
+
   const takePhoto = useCallback(() => {
     if (videoRef.current && canvasRef.current) {
       const video = videoRef.current;
@@ -53,8 +84,8 @@ const CameraCapture: React.FC<CameraCaptureProps> = ({ onCapture, label, mode = 
       const ctx = canvas.getContext('2d');
       if (ctx) {
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const dataUrl = canvas.toDataURL('image/jpeg');
-        onCapture(dataUrl, 'image');
+        const compressedDataUrl = processImage(canvas);
+        onCapture(compressedDataUrl, 'image');
         stopCamera();
       }
     }
@@ -66,7 +97,20 @@ const CameraCapture: React.FC<CameraCaptureProps> = ({ onCapture, label, mode = 
       const reader = new FileReader();
       reader.onload = (event) => {
         const dataUrl = event.target?.result as string;
-        onCapture(dataUrl, file.type.startsWith('video') ? 'video' : 'image');
+        if (file.type.startsWith('image')) {
+            const img = new Image();
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                canvas.width = img.width;
+                canvas.height = img.height;
+                const ctx = canvas.getContext('2d');
+                ctx?.drawImage(img, 0, 0);
+                onCapture(processImage(canvas), 'image');
+            };
+            img.src = dataUrl;
+        } else {
+            onCapture(dataUrl, 'video');
+        }
       };
       reader.readAsDataURL(file);
     }

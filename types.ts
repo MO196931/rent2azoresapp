@@ -1,54 +1,36 @@
 
-
 export enum AppPhase {
   WELCOME = 'WELCOME',
-  LOCATIONS = 'LOCATIONS',
-  ACCOMMODATION = 'ACCOMMODATION',
   DETAILS = 'DETAILS',
-  VEHICLE_CHECKIN = 'VEHICLE_CHECKIN',
   CONTRACT_SIGNATURE = 'CONTRACT_SIGNATURE',
   COMPLETED = 'COMPLETED',
-  ADMIN_DASHBOARD = 'ADMIN_DASHBOARD'
+  ADMIN_DASHBOARD = 'ADMIN_DASHBOARD',
+  DIAGNOSTIC = 'DIAGNOSTIC'
 }
 
 export interface DriverInfo {
   name: string;
   email: string;
   phone: string;
-  nif?: string;
   idNumber?: string;
   licenseNumber?: string;
-  licenseExpiry?: string;
-  docFront?: string;
-  docBack?: string;
-  licenseFront?: string;
-  licenseBack?: string;
 }
 
 export interface VehicleCheckinData {
-  odometerPhoto?: string;
-  odometerValue?: number;
-  fuelLevel?: string;
   interiorPhotos: string[];
   exteriorPhotos: string[];
   damagePhotos: string[];
-  isCompleteLater?: boolean;
-  observations?: string;
+  odometerPhoto?: string;
 }
 
 export interface ReservationData {
   id?: string;
-  status?: 'draft' | 'confirmed' | 'completed' | 'cancelled';
+  status: 'draft' | 'confirmed' | 'active' | 'completed' | 'cancelled';
   startDate?: string;
   startTime?: string;
   endDate?: string;
   endTime?: string;
   pickupLocation?: string;
-  dropoffLocation?: string;
-  accommodationName?: string;
-  accommodationAddress?: string;
-  accommodationPlaceId?: string;
-  // Added selectedCarId to fix type error in googleCalendar.ts
   selectedCarId?: string;
   mainDriver: DriverInfo;
   additionalDrivers: DriverInfo[];
@@ -59,40 +41,22 @@ export interface ReservationData {
   createdAt?: string;
 }
 
-export type CarStatus = 'available' | 'rented' | 'maintenance' | 'cleaning';
-
 export interface CarDetails {
   id: string;
   brand: string;
   model: string;
   licensePlate: string;
-  vin: string;
   category: string;
   price: string;
   image: string;
-  specs: string;
   status: CarStatus;
-  currentOdometer: number;
-  fuelLevel: string;
+  specs?: string;
+  vin?: string;
+  currentOdometer?: number;
+  fuelLevel?: string;
 }
 
-export interface MaintenanceRecord {
-  id: string;
-  carId: string;
-  date: string;
-  type: 'Preventiva' | 'Corretiva' | 'IPO' | 'Pneus' | 'Limpeza';
-  odometer: number;
-  cost: number;
-  description: string;
-}
-
-export interface CompanySettings {
-  name: string;
-  address: string;
-  nif: string;
-  email: string;
-  logoUrl?: string;
-}
+export type CarStatus = 'available' | 'rented' | 'maintenance' | 'cleaning';
 
 export interface AppNotification {
   id: string;
@@ -102,7 +66,38 @@ export interface AppNotification {
   timestamp: number;
 }
 
-export type ModuleName = 'AI_CORE' | 'AUDIO_SUBSYSTEM' | 'NETWORK' | 'DATABASE' | 'USER_INTERFACE';
+export interface CompanySettings {
+  name: string;
+  address: string;
+  nif: string;
+  email: string;
+  logoUrl: string;
+}
+
+export interface DriverRole {
+  id: string;
+  label: string;
+  description: string;
+  canSignContract: boolean;
+  requiresId: boolean;
+  isSystemRole: boolean;
+}
+
+export interface ServiceItem {
+  id: string;
+  name: string;
+  price: number;
+  priceModel: 'daily' | 'fixed';
+  description: string;
+}
+
+export interface MaintenanceRecord {
+  id: string;
+  carId: string;
+  date: string;
+  type: string;
+  description: string;
+}
 
 export interface SystemLog {
   id: string;
@@ -113,9 +108,30 @@ export interface SystemLog {
   resolved: boolean;
 }
 
+export interface HealthReport {
+  lastCheck: string;
+  status: 'healthy' | 'degraded' | 'critical';
+  issues: string[];
+  stabilityScore: number;
+  modules: ModuleHealth[];
+  recentHeals: HealingAction[];
+  permissions: any;
+  environment: {
+    online: boolean;
+    memory: number;
+    storageUsage: {
+      used: number;
+      total: number;
+      percentage: number;
+    };
+    batteryLevel?: number;
+    isCharging?: boolean;
+  };
+}
+
 export interface ModuleHealth {
-  name: ModuleName;
-  status: 'healthy' | 'degraded' | 'failing';
+  name: string;
+  status: 'healthy' | 'degraded' | 'critical';
   latency: number;
   errorCount: number;
   lastTestMessage?: string;
@@ -125,39 +141,18 @@ export interface HealingAction {
   id: string;
   module: ModuleName;
   action: string;
+  timestamp: number;
   success: boolean;
   resultMessage: string;
-  timestamp: number;
 }
 
-export interface LearningMetric {
-  topic: string;
-  timestamp: number;
-  improvement: number;
-}
+export type ModuleName = 'AI_CORE' | 'AUDIO_SUBSYSTEM' | 'NETWORK' | 'DATABASE' | 'USER_INTERFACE' | 'HARDWARE_LAYER';
 
-export interface HealthReport {
-  lastCheck: string;
-  status: 'healthy' | 'degraded' | 'critical';
-  issues: string[];
-  stabilityScore: number;
-  modules: ModuleHealth[];
-  recentHeals: HealingAction[];
-}
-
-export interface ServiceItem {
-  id: string;
-  name: string;
-  price: number;
-  priceModel: 'fixed' | 'daily';
-  type: 'insurance' | 'extra' | 'fee';
-  description: string;
-  coverageDetails?: string;
-}
+export type SupportedLang = 'pt' | 'en' | 'es' | 'fr';
 
 export interface GoogleCalendar {
   id: string;
   summary: string;
-  primary?: boolean;
   description?: string;
+  primary?: boolean;
 }
